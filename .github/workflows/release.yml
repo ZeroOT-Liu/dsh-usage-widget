@@ -63,11 +63,22 @@ jobs:
           set -euo pipefail
           TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"
           NOTES="release-notes/${TAG}.md"
+          NOTES_ARGS=()
           if [ -f "$NOTES" ]; then
             echo "using release notes from $NOTES"
             NOTES_ARGS=(--notes-file "$NOTES")
           else
-            echo "no $NOTES; falling back to the annotated tag message"
+            # A tag can predate its own notes file (notes are often written
+            # after the fact, or a manual run re-publishes an older tag), so
+            # look on the default branch before giving up on the file.
+            BRANCH="${GITHUB_DEFAULT_BRANCH:-main}"
+            if git fetch --depth=1 origin "$BRANCH" >/dev/null 2>&1 && git show "FETCH_HEAD:${NOTES}" > /tmp/release-notes.md 2>/dev/null; then
+              echo "using release notes from ${BRANCH}:${NOTES}"
+              NOTES_ARGS=(--notes-file /tmp/release-notes.md)
+            fi
+          fi
+          if [ ${#NOTES_ARGS[@]} -eq 0 ]; then
+            echo "no ${NOTES} anywhere; falling back to the annotated tag message"
             TAG_MESSAGE="$(git tag -l --format='%(contents)' "$TAG" || true)"
             if [ -n "${TAG_MESSAGE//[[:space:]]/}" ]; then
               NOTES_ARGS=(--notes "$TAG_MESSAGE")
