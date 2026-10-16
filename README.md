@@ -1,5 +1,7 @@
 # dsh-usage-widget（用量与余额）
 
+<img src="assets/icon.png" width="88" alt="图标：虎鲸尾鳍下方三根上升的用量柱" align="right">
+
 在 DeepSeek Harness 桌面端**侧边栏左下角**（Settings 上方）显示：
 
 - **账号余额** —— 通过官方账号服务 `ctx.deepseekAccount.getBalance` 读取，与「设置 → 账号」同源；充值余额与赠送余额都显示在收起状态的第一行。
@@ -87,6 +89,7 @@ dsh plugin --profile desktop add "link:/绝对路径/dsh-usage-widget"
 | [lib/pricing.js](lib/pricing.js) | 价目表、别名解析、高峰判定与计价 |
 | [lib/config.js](lib/config.js) | 行配置归一化（不依赖 schemastery） |
 | [client.js](client.js) | 客户端半边：`sidebar.footer.action` 部件 |
+| [icon.svg](icon.svg) | 插件图标（虎鲸尾鳍 + 上升柱）；[assets/icon.png](assets/icon.png) 是供 README 使用的位图版本 |
 
 插件是**零依赖**的：只使用 Node 内置模块与相对导入。profile 安装的插件无法解析 DSH 自带的 `@deepseek-ai/*` 包，因此宿主不 `import` 它们（也不导出 Cordis `Config` schema），客户端不 `require` 任何 Harness Client 包，样式只引用 `--dsw-alias-*` 主题 token。
 

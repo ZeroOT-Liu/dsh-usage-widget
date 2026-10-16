@@ -1,6 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="64" height="64" role="img" aria-label="usage and balance">
-  <rect width="32" height="32" rx="8" fill="#4d6bfe"/>
-  <rect x="6" y="9.5" width="20" height="14" rx="3.2" fill="none" stroke="#ffffff" stroke-width="1.9"/>
-  <path d="M6 15h20" stroke="#ffffff" stroke-width="1.9"/>
-  <circle cx="21.5" cy="19.6" r="1.7" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-labelledby="dsh-uw-title">
+  <title id="dsh-uw-title">DeepSeek Harness 用量与余额</title>
+  <defs>
+    <linearGradient id="dsh-uw-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5686fe"/>
+      <stop offset="1" stop-color="#4176e6"/>
+    </linearGradient>
+  </defs>
+  <rect width="24" height="24" rx="5.4" fill="url(#dsh-uw-tile)"/>
+  <g fill="#ffffff">
+    <!-- Orca fluke: the Harness mark, kept small so the bars carry the meaning. -->
+    <path d="M12 21.4C11.2 16.8 7.4 10.8 2.3 7.3C4.7 7.6 8.5 9.6 12 12.5C15.5 9.6 19.3 7.6 21.7 7.3C16.6 10.8 12.8 16.8 12 21.4Z"
+          transform="translate(12 6.6) scale(0.52) translate(-12 -12)"/>
+    <!-- Ascending bars: consumption, growing left to right. -->
+    <rect x="5.4" y="16.9" width="3.2" height="3.8" rx="1.6"/>
+    <rect x="10.4" y="14.5" width="3.2" height="6.2" rx="1.6"/>
+    <rect x="15.4" y="11.9" width="3.2" height="8.8" rx="1.6"/>
+  </g>
 </svg>
