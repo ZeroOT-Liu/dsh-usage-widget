@@ -320,6 +320,72 @@ async function monthAggregationTest() {
   await fsp.rm(root, { recursive: true, force: true })
 }
 
+/* ------------------------------------------------ artifact rewrite recovery */
+
+console.log('\nartifact rewrite recovery')
+
+/**
+ * Session artifacts get rewritten (compacted) under the reader. Two defects
+ * showed up in the field because of that: a diagnostic from a transient
+ * failure was never cleared, and trusting `stat().size` over the bytes actually
+ * read turned a shrunk file into zero padding that the scanner rejected.
+ */
+async function rewriteRecoveryTest() {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-uw-rewrite-'))
+  const dir = path.join(root, '--fake--', 'session-R')
+  await fsp.mkdir(dir, { recursive: true })
+  const file = path.join(dir, 'session.v4.jsonl.zstd')
+
+  const artifact = (inputs) =>
+    Buffer.concat([
+      frame(`${JSON.stringify({ type: 'session', id: 'session-R', version: 4 })}\n`),
+      ...inputs.map((input) =>
+        frame(
+          `${JSON.stringify({
+            type: 'assistant/message',
+            time: Date.now() - 1000,
+            data: {
+              usage: { inputTokens: input, cacheReadTokens: 0, outputTokens: 1 },
+              message: { source: { model: 'deepseek-v4-pro' } },
+            },
+          })}\n`,
+        ),
+      ),
+    ])
+
+  const index = new UsageIndex({ sessionsDir: root })
+  const dayKey = localDayKey(Date.now())
+
+  await fsp.writeFile(file, artifact([100, 200]))
+  await index.refresh()
+  test('a healthy pass reports no error', () => {
+    assert.equal(index.stats().lastError, null)
+    assert.equal(index.bucketFor(dayKey).bucket.inputTokens, 300)
+  })
+
+  // Simulate a truncated/rewritten artifact the reader cannot parse.
+  await fsp.writeFile(file, Buffer.from('this is not a zstandard frame at all'))
+  await index.refresh()
+  test('an unreadable artifact is reported', () => {
+    assert.ok(index.stats().lastError !== null, 'the failure is surfaced')
+  })
+
+  await fsp.writeFile(file, artifact([500]))
+  await index.refresh()
+  test('a clean pass clears the previous diagnostic instead of keeping it forever', () => {
+    assert.equal(index.stats().lastError, null, 'a stale error must not persist')
+    assert.equal(index.bucketFor(dayKey).bucket.inputTokens, 500, 'the rewritten artifact is re-read')
+  })
+
+  await fsp.writeFile(file, artifact([7, 7, 7]))
+  await index.refresh()
+  test('a rewritten artifact replaces its earlier totals rather than adding to them', () => {
+    assert.equal(index.bucketFor(dayKey).bucket.inputTokens, 21)
+  })
+
+  await fsp.rm(root, { recursive: true, force: true })
+}
+
 /* ------------------------------------------------- real session artifacts */
 
 console.log('\nreal session artifacts')
@@ -403,6 +469,7 @@ async function realLogTest() {
 
 await testAsync('synthetic multi-frame append, torn frame and per-model cost', syntheticTest)
 await testAsync('month aggregation across days, months and sessions', monthAggregationTest)
+await testAsync('artifact rewrite recovery and diagnostics', rewriteRecoveryTest)
 await testAsync('indexed usage equals a full brute-force decode of the real logs', realLogTest)
 
 console.log(`\n${passed} passed, ${failed} failed`)
