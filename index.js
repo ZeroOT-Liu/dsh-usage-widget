@@ -12,23 +12,21 @@ import { createUsageService } from './lib/service.js'
 
 export const name = 'dsh-usage-widget'
 
+/**
+ * The one service this half needs.
+ *
+ * Declaring it is not cosmetic. Cordis only hands a plugin a service once its
+ * fiber is allowed to see it, and a plugin that declares `inject` is held back
+ * until the service exists. Without this line `apply()` runs during a cold
+ * start before the web server is visible, `ctx.webServer` is refused, and the
+ * summary route is silently never registered — the widget then reads 401 from
+ * the API gateway and shows no usage and no balance. It worked on a warm HMR
+ * reload only because the server was already up by then.
+ */
+export const inject = ['webServer']
+
 /** Exact path served to the browser half. */
 export const ROUTE = '/api/dsh-usage-widget/summary'
-
-/** Resolve an optional service by name, preferring the property accessor. */
-function optionalService(ctx, key) {
-  try {
-    const viaGet = ctx?.get?.(key)
-    if (viaGet !== undefined && viaGet !== null) return viaGet
-  } catch {
-    // Fall through to the property accessor.
-  }
-  try {
-    return ctx?.[key] ?? null
-  } catch {
-    return null
-  }
-}
 
 /** Hostname of a `Host`/`Origin` authority, without its port. */
 function authorityHostname(authority) {
@@ -103,9 +101,14 @@ export function apply(ctx, config) {
   )
 
   ctx.effect(() => {
-    const webServer = optionalService(ctx, 'webServer')
-    if (webServer === null || typeof webServer.register !== 'function') {
-      logger?.warn?.('[dsh-usage-widget] webServer service unavailable; the widget cannot load data')
+    // `inject: ['webServer']` guarantees this half is only started once the
+    // service exists, so it is read directly rather than probed and skipped.
+    const webServer = ctx.webServer
+    if (webServer === null || webServer === undefined || typeof webServer.register !== 'function') {
+      // Unreachable while `inject` holds. If it is ever reached the route is
+      // missing and the widget is dead, so report it instead of degrading
+      // quietly — a silent skip here is what produced the cold-start bug.
+      logger?.error?.('[dsh-usage-widget] webServer.register unavailable; the summary route was NOT registered')
       return () => {}
     }
     return webServer.register({

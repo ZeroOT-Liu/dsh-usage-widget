@@ -100,6 +100,7 @@ The plugin is **dependency-free**: only Node built-ins and relative imports. Plu
 ```bash
 node test/run-tests.mjs      # frame decoding, pricing, incremental aggregation (cross-checked against a full decode of the real logs)
 node test/client-smoke.mjs   # loads the client half through its real handshake and renders the widget in Node
+node test/host-smoke.mjs     # host half: service dependency declarations, route trust checks and responses
 ```
 
 ## Known limitations

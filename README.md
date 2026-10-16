@@ -100,6 +100,7 @@ dsh plugin --profile desktop add "link:/绝对路径/dsh-usage-widget"
 ```bash
 node test/run-tests.mjs      # 帧解码、计价、增量聚合（与真实日志全量解码交叉验证）
 node test/client-smoke.mjs   # 在 Node 中按真实握手加载并渲染客户端部件
+node test/host-smoke.mjs     # 宿主半边：服务依赖声明、路由的信任校验与响应
 ```
 
 ## 已知限制
