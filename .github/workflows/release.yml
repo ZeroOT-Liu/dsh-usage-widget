@@ -41,15 +41,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Idempotent: re-pushing a tag replaces the asset instead of failing.
-          # GitHub turns a release into a draft when its tag is deleted and
-          # recreated, so an existing release is also un-drafted here — the
-          # `releases/latest/download/...` URL only resolves for published ones.
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" dsh-usage-widget.tgz --clobber
-            gh release edit "${GITHUB_REF_NAME}" --draft=false
+          # Release notes come from release-notes/<tag>.md when it exists.
+          # `--generate-notes` is deliberately not used: it only lists merged
+          # pull requests, so a repository that tags commits directly would
+          # publish an empty body — and it would override the annotated tag
+          # message, which is otherwise used as the fallback.
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          NOTES="release-notes/${TAG}.md"
+          if [ -f "$NOTES" ]; then
+            echo "using release notes from $NOTES"
+            NOTES_ARGS=(--notes-file "$NOTES")
           else
-            gh release create "${GITHUB_REF_NAME}" dsh-usage-widget.tgz \
-              --title "${GITHUB_REF_NAME}" \
-              --generate-notes
+            echo "no $NOTES; falling back to the annotated tag message"
+            NOTES_ARGS=(--notes "$(git tag -l --format='%(contents)' "$TAG")")
+          fi
+
+          # Idempotent: re-pushing a tag replaces the asset and the notes
+          # instead of failing. GitHub also turns a release into a draft when
+          # its tag is deleted and recreated, so an existing release is
+          # un-drafted here — `releases/latest/download/...` only resolves for
+          # published releases.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dsh-usage-widget.tgz --clobber
+            gh release edit "$TAG" "${NOTES_ARGS[@]}" --draft=false
+          else
+            gh release create "$TAG" dsh-usage-widget.tgz \
+              --title "$TAG" \
+              "${NOTES_ARGS[@]}"
           fi
