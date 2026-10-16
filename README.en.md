@@ -9,10 +9,11 @@ Shows the following at the **bottom left of the sidebar** (just above Settings) 
 - **Account balance** — read through the official account service `ctx.deepseekAccount.getBalance`, the same source as Settings → Account. Both the topped-up balance and any bonus wallets appear on the first line, without expanding anything.
 - **Today's token usage** — summed across all sessions, with input (cache hit / cache miss) and output broken out, and reasoning tokens listed separately.
 - **Today's spend** — derived from per-model prices and the **peak / off-peak** windows. Hover or click to expand the current session's detail.
+- **Month to date** — this month's tokens, spend, request count, active days and session count.
 
-By default it shows today's totals. Hovering or clicking expands: balance, today's breakdown, the per-model grouping, the **current session's** usage today, the last update time, and a refresh button.
+Collapsed, it shows three lines: balance, today, this month. Hovering or clicking expands: balance, today's breakdown, the per-model grouping, **month to date**, the **current session** (today and month), the last update time, and a refresh button.
 
-**The whole balance is visible without expanding**: the first line reads `balance ¥5.83 · bonus ¥9.56`, the topped-up balance in the primary colour and bonus wallets dimmed — both readable at a glance. When the sidebar collapses to its 56px rail the widget shrinks to a single icon, and the full figures (bonus included) move into its tooltip.
+**The key figures are visible without expanding**: the first line reads `balance ¥5.83 · bonus ¥9.56` (the topped-up balance in the primary colour, bonus wallets dimmed), the second is today and the third is this month. When the sidebar collapses to its 56px rail the widget shrinks to a single icon and every figure moves into its tooltip.
 
 ## Where the data comes from
 
@@ -66,8 +67,9 @@ Configuration lives on this plugin's row in [cordis.patch.yml](cordis.patch.yml)
 | `refreshSeconds` | `30` | Widget polling interval |
 | `balanceRefreshSeconds` | `180` | Balance cache lifetime (the balance comes from an external platform, so it is not polled aggressively) |
 | `peakMultiplier` | `2` | Price multiplier applied during peak hours |
-| `keepDays` | `45` | How many days of aggregated logs to retain |
+| `keepDays` | `45` | How many days of aggregated logs to retain (covering one calendar month keeps the month total complete) |
 | `sessionsDir` | automatic | Session directory; defaults to `$DSH_HOME/sessions`, falling back to `~/.dsh/sessions` |
+| `showMonth` | `true` | Whether the "this month" line appears while collapsed; `false` keeps the footer compact |
 | `models` | DeepSeek published prices | Model → `{ cacheHit, cacheMiss, output }` |
 | `aliases` | see the file | Maps legacy, dated or `-exp` model ids onto a priced key |
 | `allowHosts` | `[]` | Extra hostnames allowed to reach the summary route, besides loopback |
@@ -108,6 +110,7 @@ node test/host-smoke.mjs     # host half: service dependency declarations, route
 - Spend is a **reference figure derived from a price table**, not a bill; the platform's usage page is authoritative. Update the config when prices change.
 - "Today" follows the host machine's local timezone.
 - Session logs are flushed in batches, so the widget can lag the conversation by one batch (usually a few seconds). The refresh button re-reads immediately.
+- Month-to-date depends on the log retention window (`keepDays`, default 45 days — enough to cover a calendar month). Below 32 days, early-month data may already have been pruned; the panel then says the early-month data is past the retention window.
 
 ## Requirements
 

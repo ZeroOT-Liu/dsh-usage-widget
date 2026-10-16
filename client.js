@@ -22,6 +22,10 @@ window.__ModuleLoader__.load({
       bonus: '赠送',
       today: '今日',
       todayUsage: '今日用量',
+      thisMonth: '本月',
+      monthUsage: '本月累计',
+      activeDays: '活跃天数',
+      monthPartial: '本月早期数据超出保留窗口，可能不完整',
       currentSession: '当前会话',
       sessionUnknown: '未选中会话',
       tokens: 'tokens',
@@ -53,6 +57,10 @@ window.__ModuleLoader__.load({
       bonus: 'Bonus',
       today: 'Today',
       todayUsage: 'Today usage',
+      thisMonth: 'This month',
+      monthUsage: 'Month to date',
+      activeDays: 'Active days',
+      monthPartial: 'Early-month data is past the retention window; the total may be short',
       currentSession: 'Current session',
       sessionUnknown: 'No session selected',
       tokens: 'tokens',
@@ -142,7 +150,8 @@ window.__ModuleLoader__.load({
       if (!Number.isFinite(number) || number <= 0) return '0'
       if (number < 1000) return String(Math.round(number))
       if (number < 1e6) return `${trimFixed(number / 1e3, 1)}K`
-      return `${trimFixed(number / 1e6, 2)}M`
+      if (number < 1e9) return `${trimFixed(number / 1e6, 2)}M`
+      return `${trimFixed(number / 1e9, 2)}B`
     }
 
     function formatInt(value) {
@@ -281,6 +290,34 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dsh-uw_group' }, children)
     }
 
+    /**
+     * Month-to-date totals. Only the figures that are meaningful cumulatively
+     * are shown — the full input/output breakdown already exists for today, and
+     * repeating it would bury the two numbers the section exists for.
+     */
+    function MonthBlock(props) {
+      const { view, t, currency } = props
+      if (view === null || view === undefined) {
+        return h(KeyValue, { label: t('totalTokens'), value: t('none') })
+      }
+      const children = [
+        h(KeyValue, { key: 'total', strong: true, label: t('totalTokens'), value: formatInt(view.totalTokens) }),
+        h(KeyValue, { key: 'cost', strong: true, label: t('cost'), value: formatMoney(view.cost, currency) }),
+        h(KeyValue, { key: 'req', label: t('requests'), value: formatInt(view.requests) }),
+        h(KeyValue, { key: 'days', label: t('activeDays'), value: formatInt(view.days) }),
+        h(KeyValue, { key: 'sess', label: t('sessions'), value: formatInt(view.sessions) }),
+      ]
+      if (view.complete === false) {
+        children.push(h('div', { key: 'partial', className: 'dsh-uw_note' }, t('monthPartial')))
+      }
+      if (view.costComplete === false && Array.isArray(view.unpricedModels) && view.unpricedModels.length > 0) {
+        children.push(
+          h('div', { key: 'unpriced', className: 'dsh-uw_note' }, `${t('unpriced')}: ${view.unpricedModels.join(', ')}`),
+        )
+      }
+      return h('div', { className: 'dsh-uw_group' }, children)
+    }
+
     function BalanceBlock(props) {
       const { balance, t, currency } = props
       if (balance === null || balance === undefined) return null
@@ -366,6 +403,22 @@ window.__ModuleLoader__.load({
       }
 
       groups.push(h('div', { className: 'dsh-uw_divider', key: 'd3' }))
+      const month = data?.month ?? null
+      const showMonth = data?.pricing?.showMonth !== false
+      if (showMonth) {
+        groups.push(
+          h('div', { className: 'dsh-uw_group', key: 'month' }, [
+            h(
+              'div',
+              { className: 'dsh-uw_groupTitle', key: 'h' },
+              `${t('monthUsage')}${month?.monthKey ? ` · ${month.monthKey}` : ''}`,
+            ),
+            h(MonthBlock, { view: month, t, currency }),
+          ]),
+        )
+        groups.push(h('div', { className: 'dsh-uw_divider', key: 'd4' }))
+      }
+
       groups.push(
         h('div', { className: 'dsh-uw_group', key: 'session' }, [
           h(
@@ -374,6 +427,13 @@ window.__ModuleLoader__.load({
             sessionId ? `${t('currentSession')}` : t('sessionUnknown'),
           ),
           sessionId ? h(UsageBlock, { view: session, t, currency, compact: true }) : null,
+          sessionId && session?.month !== undefined && session.month !== null
+            ? h(KeyValue, {
+                key: 'smonth',
+                label: t('thisMonth'),
+                value: `${formatTokens(session.month.totalTokens)} · ${formatMoney(session.month.cost, currency)}`,
+              })
+            : null,
         ]),
       )
 
@@ -506,20 +566,31 @@ window.__ModuleLoader__.load({
 
         const currency = data?.pricing?.currency ?? 'CNY'
         const today = data?.today ?? null
+        const month = data?.month ?? null
+        const showMonth = data?.pricing?.showMonth !== false
         const balance = data?.balance ?? null
 
         const balanceWalletParts = walletParts(balance, currency, translate)
         const balanceText = walletText(balanceWalletParts)
 
+        // Shared figure text; callers add the label so the tooltip never
+        // prefixes it twice.
+        const figure = (view) =>
+          `${formatTokens(view.totalTokens)} ${translate('tokens')} · ${formatMoney(view.cost, currency)}`
+
         const summaryLine = today
-          ? `${formatTokens(today.totalTokens)} ${translate('tokens')} · ${formatMoney(today.cost, currency)}`
+          ? `${translate('today')} ${figure(today)}`
           : error !== null
             ? `${translate('error')}`
             : translate('loading')
 
+        const monthFigure = showMonth && month !== null ? figure(month) : null
+        const monthLine = monthFigure === null ? null : `${translate('thisMonth')} ${monthFigure}`
+
         const tooltip = [
           `${translate('balance')}: ${balanceText}`,
-          `${translate('today')}: ${summaryLine}`,
+          `${translate('today')}: ${today === null ? summaryLine : figure(today)}`,
+          ...(monthFigure === null ? [] : [`${translate('thisMonth')}: ${monthFigure}`]),
           translate('collapsedHint'),
         ].join('\n')
 
@@ -550,6 +621,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dsh-uw_lines', key: 'lines' }, [
             h('span', { className: 'dsh-uw_line', key: 'b' }, balanceLineChildren),
             h('span', { className: `dsh-uw_line${error !== null ? ' dsh-uw_line--alert' : ' dsh-uw_line--dim'}`, key: 't' }, summaryLine),
+            monthLine === null ? null : h('span', { className: 'dsh-uw_line dsh-uw_line--dim', key: 'm' }, monthLine),
           ]),
         ]
 

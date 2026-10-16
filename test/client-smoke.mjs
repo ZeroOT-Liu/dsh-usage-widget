@@ -126,6 +126,22 @@ const PAYLOAD = {
       },
     ],
   },
+  month: {
+    monthKey: '2026-10',
+    sessions: 7,
+    days: 2,
+    complete: true,
+    requests: 777,
+    inputTokens: 3282390,
+    cacheReadTokens: 198644480,
+    outputTokens: 2592288,
+    reasoningTokens: 0,
+    totalTokens: 204519158,
+    cost: 11.136019,
+    costComplete: true,
+    unpricedModels: [],
+    models: [],
+  },
   session: {
     id: 'session-test',
     requests: 121,
@@ -134,13 +150,31 @@ const PAYLOAD = {
     costComplete: true,
     unpricedModels: [],
     models: [],
+    month: {
+      monthKey: '2026-10',
+      sessions: 1,
+      days: 1,
+      complete: true,
+      requests: 700,
+      totalTokens: 190000000,
+      cost: 10.5,
+      costComplete: true,
+      unpricedModels: [],
+      models: [],
+    },
   },
   balance: {
     status: 'ready',
     wallets: [{ currency: 'CNY', balance: '5.8338932400000000' }],
     bonusWallets: [{ currency: 'CNY', balance: '9.7907460000000000' }],
   },
-  pricing: { currency: 'CNY', peakMultiplier: 2, refreshSeconds: 30, balanceRefreshSeconds: 180 },
+  pricing: {
+    currency: 'CNY',
+    peakMultiplier: 2,
+    refreshSeconds: 30,
+    balanceRefreshSeconds: 180,
+    showMonth: true,
+  },
   diagnostics: {},
 }
 
@@ -171,7 +205,8 @@ const sandbox = {
     status: 200,
     async json() {
       sandbox.__lastUrl = url
-      return PAYLOAD
+      // Read through a mutable holder so a test can change the payload.
+      return sandbox.__payload
     },
   }),
   setTimeout,
@@ -183,6 +218,7 @@ const sandbox = {
 }
 sandbox.globalThis = sandbox
 sandbox.window.document = sandbox.document
+sandbox.__payload = PAYLOAD
 
 vm.createContext(sandbox)
 vm.runInContext(source, sandbox, { filename: 'dsh-usage-widget/client.js' })
@@ -385,11 +421,11 @@ publishSession('session-test')
 const wideTree = await render({ wide: true, t: (key) => key })
 const wideText = textOf(wideTree)
 
-await check('wide footer row shows balance, bonus and today totals from the host route', () => {
+await check('wide footer row shows balance, bonus, today and month totals', () => {
   assert.match(wideText, /balance\s+¥5\.83/, `balance rendered: ${wideText}`)
   assert.match(wideText, /bonus\s+¥9\.79/, 'bonus wallet is visible without expanding')
-  assert.match(wideText, /20\.34M/, 'today token total rendered')
-  assert.match(wideText, /¥1\.3/, 'today cost rendered')
+  assert.match(wideText, /today\s+20\.34M tokens · ¥1\.3/, 'today line rendered')
+  assert.match(wideText, /thisMonth\s+204\.52M tokens · ¥11\.14/, 'month line is visible without expanding')
   assert.ok(String(sandbox.__lastUrl).includes('sessionId=session-test'), 'the current session id is sent to the host')
 })
 
@@ -401,7 +437,9 @@ await check('collapsed rail collapses to an icon carrying the full summary', asy
   assert.ok(holder, 'narrow holder present')
   const tooltip = String(holder.props.title)
   assert.match(tooltip, /balance: ¥5\.83 · bonus ¥9\.79/, `bonus in the collapsed tooltip: ${tooltip}`)
-  assert.match(tooltip, /today: 20\.34M tokens/)
+  assert.match(tooltip, /today: 20\.34M tokens · ¥1\.3/)
+  assert.match(tooltip, /thisMonth: 204\.52M tokens · ¥11\.14/, `month in the collapsed tooltip: ${tooltip}`)
+  assert.ok(!/today: today/.test(tooltip), 'the tooltip does not label the row twice')
 })
 
 const clickTarget = find(wideTree, (node) => node.props?.className === 'dsh-uw_row')
@@ -413,7 +451,7 @@ await check('the summary row is a real button with an expanded state', () => {
   assert.equal(typeof clickTarget.props.onClick, 'function')
 })
 
-await check('clicking expands a panel with balance, per-model and current-session detail', async () => {
+await check('clicking expands a panel with balance, month, per-model and session detail', async () => {
   clickTarget.props.onClick()
   const expanded = await render({ wide: true, t: (key) => key })
   const text = textOf(expanded)
@@ -424,6 +462,15 @@ await check('clicking expands a panel with balance, per-model and current-sessio
   assert.ok(text.includes('session-test') || text.includes('currentSession'), 'current session section present')
   assert.ok(text.includes('refresh'), 'refresh action present')
   assert.ok(text.includes('20.34M · ¥1.3'), `per-model tokens and cost rendered: ${text.slice(0, 200)}`)
+
+  // Month section: the cumulative figures, and its own day/session counts.
+  assert.ok(text.includes('monthUsage'), 'month section title present')
+  assert.ok(text.includes('2026-10'), 'month key present')
+  assert.ok(text.includes('204519158'), 'month token total present')
+  assert.ok(text.includes('¥11.14'), 'month cost present')
+  assert.ok(text.includes('777'), 'month request count present')
+  assert.ok(text.includes('activeDays'), 'active-day count labelled')
+  assert.ok(text.includes('190M · ¥10.5'), 'the current session month figure is shown')
 })
 
 await check('the stylesheet is injected and its cleanup removes it', () => {
@@ -457,6 +504,23 @@ await check('re-resolves the current session when it appears after mount', async
     `the late session is picked up: ${sandbox.__lastUrl}`,
   )
   assert.ok(textOf(late).includes('20.34M'), 'the row still renders after the session arrives')
+})
+
+/* `showMonth` is read from the fetched payload, so each case needs a fresh
+ * mount rather than a re-render of already-loaded state. */
+await check('the month line can be turned off from config', async () => {
+  sandbox.__payload = { ...PAYLOAD, pricing: { ...PAYLOAD.pricing, showMonth: false } }
+  unmount()
+  publishSession('session-toggle')
+  const off = await render({ wide: true, t: (key) => key })
+  assert.ok(textOf(off).includes('20.34M'), 'today line still rendered')
+  assert.ok(!textOf(off).includes('204.52M'), 'no month line when showMonth is false')
+
+  sandbox.__payload = PAYLOAD
+  unmount()
+  publishSession('session-toggle')
+  const on = await render({ wide: true, t: (key) => key })
+  assert.ok(textOf(on).includes('204.52M'), 'month line returns when showMonth is true')
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

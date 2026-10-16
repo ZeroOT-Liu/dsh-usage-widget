@@ -16,7 +16,7 @@ import zlib from 'node:zlib'
 
 import { decodeCompleteFrames, parseJsonl, scanZstdFrames } from '../lib/session-log.js'
 import { isPeak, modelCost, resolveModelKey, DEFAULT_ALIASES, DEFAULT_PRICES } from '../lib/pricing.js'
-import { UsageIndex, localDayKey, resolveSessionsDir } from '../lib/usage-index.js'
+import { UsageIndex, localDayKey, localMonthKey, resolveSessionsDir } from '../lib/usage-index.js'
 import { bucketView } from '../lib/service.js'
 import { normalizeConfig } from '../lib/config.js'
 
@@ -214,6 +214,112 @@ async function assertBucketView(index, dayKey) {
   assert.deepEqual(unpriced.unpricedModels, ['mystery-model'])
 }
 
+/* ------------------------------------------------------ month aggregation */
+
+console.log('\nmonth aggregation')
+
+/**
+ * Month-to-date sums the day buckets of one month, so the test fixes the
+ * calendar itself rather than trusting the machine's date: two sessions,
+ * records spread over two distinct days of the current month, plus a record in
+ * the previous month that must not leak in.
+ */
+async function monthAggregationTest() {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-uw-month-'))
+  const now = new Date()
+  const dayIn = (monthOffset, day) => new Date(now.getFullYear(), now.getMonth() + monthOffset, day, 12, 0, 0).getTime()
+
+  const writeSession = async (dirName, sessionId, entries) => {
+    const dir = path.join(root, '--fake--', dirName)
+    await fsp.mkdir(dir, { recursive: true })
+    const frames = [frame(`${JSON.stringify({ type: 'session', id: sessionId, version: 4 })}\n`)]
+    for (const entry of entries) {
+      const record = {
+        type: 'assistant/message',
+        time: entry.time,
+        data: {
+          usage: {
+            inputTokens: entry.input,
+            cacheReadTokens: entry.cacheRead ?? 0,
+            outputTokens: entry.output,
+          },
+          message: { source: { model: 'deepseek-v4-pro' } },
+        },
+      }
+      frames.push(frame(`${JSON.stringify(record)}\n`))
+    }
+    await fsp.writeFile(path.join(dir, 'session.v4.jsonl.zstd'), Buffer.concat(frames))
+  }
+
+  await writeSession('session-A', 'session-A', [
+    { time: dayIn(0, 3), input: 100, cacheRead: 50, output: 10 },
+    { time: dayIn(0, 3), input: 200, cacheRead: 0, output: 20 },
+    { time: dayIn(0, 9), input: 400, cacheRead: 0, output: 40 },
+    { time: dayIn(-1, 5), input: 1000, cacheRead: 0, output: 100 },
+  ])
+  await writeSession('session-B', 'session-B', [
+    { time: dayIn(0, 9), input: 800, cacheRead: 0, output: 80 },
+    { time: dayIn(-1, 5), input: 2000, cacheRead: 0, output: 200 },
+  ])
+
+  const index = new UsageIndex({ sessionsDir: root, keepDays: 400 })
+  await index.refresh()
+
+  const currentMonth = localMonthKey(Date.now())
+  const previousMonth = localMonthKey(dayIn(-1, 5))
+
+  test('localMonthKey is the prefix of localDayKey', () => {
+    const stamp = dayIn(0, 9)
+    assert.equal(localDayKey(stamp).slice(0, 7), localMonthKey(stamp))
+    assert.notEqual(currentMonth, previousMonth)
+  })
+
+  const month = index.monthFor(currentMonth)
+  test('the current month sums every session and counts distinct active days', () => {
+    assert.equal(month.bucket.inputTokens, 100 + 200 + 400 + 800)
+    assert.equal(month.bucket.cacheReadTokens, 50)
+    assert.equal(month.bucket.outputTokens, 10 + 20 + 40 + 80)
+    assert.equal(month.bucket.requests, 4)
+    assert.equal(month.sessions, 2, 'both sessions contributed')
+    assert.equal(month.days, 2, 'two distinct days had usage')
+    assert.equal(month.complete, true, 'retention reaches back past the month start')
+  })
+
+  test('the previous month is excluded from the current month', () => {
+    const previous = index.monthFor(previousMonth)
+    assert.equal(previous.bucket.inputTokens, 1000 + 2000)
+    assert.equal(previous.bucket.requests, 2)
+    assert.equal(previous.days, 1)
+  })
+
+  test('a month can be scoped to one session', () => {
+    const scoped = index.monthFor(currentMonth, 'session-A')
+    assert.equal(scoped.bucket.inputTokens, 700)
+    assert.equal(scoped.bucket.requests, 3)
+    assert.equal(scoped.sessions, 1)
+    assert.equal(scoped.days, 2)
+    assert.equal(index.monthFor(currentMonth, 'session-other').bucket.requests, 0)
+  })
+
+  test('the wire view prices a month like a day', () => {
+    const settings = normalizeConfig({})
+    const view = bucketView(index.monthFor(currentMonth).bucket, settings)
+    assert.equal(view.totalTokens, 1500 + 50 + 150)
+    assert.equal(view.costComplete, true)
+    assert.ok(view.cost > 0)
+  })
+
+  test('a retention window that cannot reach the month start is reported', () => {
+    const narrow = new UsageIndex({ sessionsDir: root, keepDays: 2 })
+    // buckets are pruned on refresh, so assert the flag without refreshing
+    narrow.files = index.files
+    narrow.revision = index.revision
+    assert.equal(narrow.monthFor(currentMonth).complete, false, 'two days cannot cover a month')
+  })
+
+  await fsp.rm(root, { recursive: true, force: true })
+}
+
 /* ------------------------------------------------- real session artifacts */
 
 console.log('\nreal session artifacts')
@@ -235,7 +341,9 @@ async function realLogTest() {
   // Independent brute-force pass: decode every artifact in full.
   const files = await index.listFiles()
   const dayKey = localDayKey(Date.now())
+  const monthKey = localMonthKey(Date.now())
   const brute = { requests: 0, input: 0, cacheRead: 0, output: 0 }
+  const monthBrute = { requests: 0, input: 0, cacheRead: 0, output: 0, days: new Set() }
   for (const file of files) {
     const buffer = await fsp.readFile(file)
     const { frames } = scanZstdFrames(buffer)
@@ -245,11 +353,23 @@ async function realLogTest() {
       const usage = record.data?.usage
       const timeMs = Number(record.time) || Number(record.data?.time)
       if (usage === null || typeof usage !== 'object') continue
-      if (!Number.isFinite(timeMs) || localDayKey(timeMs) !== dayKey) continue
+      if (!Number.isFinite(timeMs)) continue
+      if (localDayKey(timeMs) !== dayKey && localMonthKey(timeMs) !== monthKey) continue
+      const input = Number(usage.inputTokens) || 0
+      const cacheRead = Number(usage.cacheReadTokens) || 0
+      const output = Number(usage.outputTokens) || 0
+      if (localMonthKey(timeMs) === monthKey) {
+        monthBrute.requests += 1
+        monthBrute.input += input
+        monthBrute.cacheRead += cacheRead
+        monthBrute.output += output
+        monthBrute.days.add(localDayKey(timeMs))
+      }
+      if (localDayKey(timeMs) !== dayKey) continue
       brute.requests += 1
-      brute.input += Number(usage.inputTokens) || 0
-      brute.cacheRead += Number(usage.cacheReadTokens) || 0
-      brute.output += Number(usage.outputTokens) || 0
+      brute.input += input
+      brute.cacheRead += cacheRead
+      brute.output += output
     }
   }
 
@@ -259,14 +379,30 @@ async function realLogTest() {
   assert.equal(indexed.cacheReadTokens, brute.cacheRead, 'cache-read input matches')
   assert.equal(indexed.outputTokens, brute.output, 'output matches')
 
+  const indexedMonth = index.monthFor(monthKey)
+  assert.equal(indexedMonth.bucket.requests, monthBrute.requests, 'month request count matches a full decode')
+  assert.equal(indexedMonth.bucket.inputTokens, monthBrute.input, 'month uncached input matches')
+  assert.equal(indexedMonth.bucket.cacheReadTokens, monthBrute.cacheRead, 'month cache-read input matches')
+  assert.equal(indexedMonth.bucket.outputTokens, monthBrute.output, 'month output matches')
+  assert.equal(indexedMonth.days, monthBrute.days.size, 'month active-day count matches')
+  assert.ok(
+    indexedMonth.bucket.requests >= indexed.requests,
+    'the month can never hold fewer requests than the day inside it',
+  )
+
   const view = bucketView(indexed, normalizeConfig({}))
+  const monthView = bucketView(indexedMonth.bucket, normalizeConfig({}))
   console.log(
     `  info files=${stats.files} sessions=${index.sessionIds().length} today requests=${view.requests} tokens=${view.totalTokens} cost=${view.cost} ${view.costComplete ? '' : `(unpriced: ${view.unpricedModels.join(',')})`}`,
+  )
+  console.log(
+    `  info month=${monthKey} days=${indexedMonth.days} requests=${monthView.requests} tokens=${monthView.totalTokens} cost=${monthView.cost} complete=${indexedMonth.complete}`,
   )
   assert.ok(view.totalTokens === view.inputTokens + view.cacheReadTokens + view.outputTokens)
 }
 
 await testAsync('synthetic multi-frame append, torn frame and per-model cost', syntheticTest)
+await testAsync('month aggregation across days, months and sessions', monthAggregationTest)
 await testAsync('indexed usage equals a full brute-force decode of the real logs', realLogTest)
 
 console.log(`\n${passed} passed, ${failed} failed`)
