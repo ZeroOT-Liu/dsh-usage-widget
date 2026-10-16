@@ -106,6 +106,7 @@ node test/client-smoke.mjs   # 在 Node 中按真实握手加载并渲染客户�
 ## 环境要求
 
 - DeepSeek Harness 桌面版（`desktop` profile，验证于 `0.2.0-rc.2`）。装在 `web` profile 也可以，只要该 profile 组合了官方账号插件（`@deepseek-ai/dsh-deepseek-account-platform`）；没有它时部件仍显示用量，余额位置显示「账号服务不可用」。
+- 部件还会读取该 profile 的会话服务（`sessions`、`uiSession`）来判定当前会话，标准组合都自带这两项。
 - 会话日志为 Zstandard 多帧格式，需要宿主自带 Node ≥ 22.15（DSH 运行时为 Node 24，无需额外处理）。
 - 未登录 DeepSeek 账号时余额显示「未登录」，用量与花费照常统计。
 
