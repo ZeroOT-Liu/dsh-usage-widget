@@ -421,23 +421,54 @@ window.__ModuleLoader__.load({
         const [sessionId, setSessionId] = React.useState('')
 
         React.useEffect(() => {
-          let source = null
-          try {
-            source = ctx.uiSession?.adapter?.current ?? null
-          } catch {
-            source = null
-          }
-          if (source === null || typeof source.getSnapshot !== 'function') return undefined
-          const sync = () => {
+          // The host owns the notion of "the session the main view is showing";
+          // this plugin only reads that resolution. Cordis refuses property
+          // access for any service a plugin did not declare in `inject`
+          // ("cannot get property … without inject"), so `uiSession` and
+          // `sessions` are both declared above — without them this read throws
+          // and the panel would always claim no session is selected.
+          const readSessionId = () => {
             try {
-              setSessionId(source.getSnapshot()?.key ?? '')
+              const key = ctx.uiSession.adapter.current.getSnapshot()?.key
+              return typeof key === 'string' ? key : ''
             } catch {
-              setSessionId('')
+              return ''
             }
           }
+          const sync = () => setSessionId(readSessionId())
           sync()
-          if (typeof source.subscribe !== 'function') return undefined
-          return source.subscribe(sync)
+
+          // The conversation shell claims the main view after the sidebar has
+          // already rendered, so re-resolve whenever either source changes
+          // rather than trusting the value read at mount.
+          const candidates = []
+          try {
+            candidates.push(ctx.uiSession.adapter.current)
+          } catch {
+            /* the binding source is unavailable in this context */
+          }
+          try {
+            candidates.push(ctx.sessions.list)
+          } catch {
+            /* the session catalog is unavailable in this context */
+          }
+          const disposers = []
+          for (const candidate of candidates) {
+            try {
+              if (candidate && typeof candidate.subscribe === 'function') disposers.push(candidate.subscribe(sync))
+            } catch {
+              /* a source that cannot subscribe simply does not participate */
+            }
+          }
+          return () => {
+            for (const dispose of disposers) {
+              try {
+                dispose?.()
+              } catch {
+                /* teardown is best effort */
+              }
+            }
+          }
         }, [])
 
         const load = React.useCallback(
@@ -606,6 +637,9 @@ window.__ModuleLoader__.load({
       )
     }
 
-    return { inject: ['slots', 'locale'], apply }
+    // `sessions` and `uiSession` are required, not optional: Cordis throws on
+    // reading an undeclared service property, and the current-session section
+    // reads the host's own main-view resolution from `uiSession`.
+    return { inject: ['slots', 'locale', 'sessions', 'uiSession'], apply }
   },
 })

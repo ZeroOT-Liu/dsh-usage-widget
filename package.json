@@ -1,6 +1,6 @@
 {
   "name": "dsh-usage-widget",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "侧边栏左下角显示账号余额、今日 token 消耗与花费",
   "type": "module",
   "license": "MIT",
