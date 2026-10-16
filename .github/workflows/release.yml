@@ -3,12 +3,23 @@
 # The release asset is deliberately renamed to `dsh-usage-widget.tgz` so that
 # the stable `releases/latest/download/dsh-usage-widget.tgz` URL keeps working
 # across versions — that URL is what the README tells users to install from.
+#
+# Release notes come from `release-notes/<tag>.md`. `--generate-notes` is
+# deliberately not used: it only lists merged pull requests, so a repository
+# that tags commits directly would publish an empty body — and it would
+# override the annotated tag message, which serves as the fallback.
 name: release
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish or re-publish'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -18,6 +29,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A manual run publishes an existing tag, so check that ref out.
+          # Full history and tags are needed by the tag-message fallback.
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -40,28 +56,33 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          # Release notes come from release-notes/<tag>.md when it exists.
-          # `--generate-notes` is deliberately not used: it only lists merged
-          # pull requests, so a repository that tags commits directly would
-          # publish an empty body — and it would override the annotated tag
-          # message, which is otherwise used as the fallback.
+          # INPUT_TAG is passed through the environment rather than inlined, so
+          # a tag name can never be read as shell syntax.
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"
           NOTES="release-notes/${TAG}.md"
           if [ -f "$NOTES" ]; then
             echo "using release notes from $NOTES"
             NOTES_ARGS=(--notes-file "$NOTES")
           else
             echo "no $NOTES; falling back to the annotated tag message"
-            NOTES_ARGS=(--notes "$(git tag -l --format='%(contents)' "$TAG")")
+            TAG_MESSAGE="$(git tag -l --format='%(contents)' "$TAG" || true)"
+            if [ -n "${TAG_MESSAGE//[[:space:]]/}" ]; then
+              NOTES_ARGS=(--notes "$TAG_MESSAGE")
+            else
+              # Never publish an empty body. Built with printf on one line: a
+              # multi-line literal here would dedent to column 0 and break the
+              # `run: |` block scalar.
+              NOTES_ARGS=(--notes "$(printf 'Published %s.\n\nInstall:\n\n    dsh plugin --profile desktop add "%s"\n' "$TAG" "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/dsh-usage-widget.tgz")")
+            fi
           fi
 
-          # Idempotent: re-pushing a tag replaces the asset and the notes
-          # instead of failing. GitHub also turns a release into a draft when
-          # its tag is deleted and recreated, so an existing release is
-          # un-drafted here — `releases/latest/download/...` only resolves for
-          # published releases.
+          # Idempotent: re-publishing replaces the asset and the notes instead
+          # of failing. GitHub also turns a release into a draft when its tag is
+          # deleted and recreated, so an existing release is un-drafted here —
+          # `releases/latest/download/...` only resolves for published releases.
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dsh-usage-widget.tgz --clobber
             gh release edit "$TAG" "${NOTES_ARGS[@]}" --draft=false
