@@ -1,5 +1,7 @@
 # dsh-usage-widget（用量与余额）
 
+[English](README.en.md) | 中文
+
 <img src="assets/icon.png" width="88" alt="图标：虎鲸尾鳍下方三根上升的用量柱" align="right">
 
 在 DeepSeek Harness 桌面端**侧边栏左下角**（Settings 上方）显示：

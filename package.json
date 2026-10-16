@@ -36,7 +36,8 @@
     "icon.svg",
     "assets",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "README.en.md"
   ],
   "meta": {
     "title": "用量与余额",
