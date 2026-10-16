@@ -1,0 +1,54 @@
+{
+  "name": "dsh-usage-widget",
+  "version": "1.0.0",
+  "description": "侧边栏左下角显示账号余额、今日 token 消耗与花费",
+  "type": "module",
+  "license": "MIT",
+  "author": "ZeroOT-Liu",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "usage",
+    "balance",
+    "cost"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZeroOT-Liu/dsh-usage-widget.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZeroOT-Liu/dsh-usage-widget/issues"
+  },
+  "homepage": "https://github.com/ZeroOT-Liu/dsh-usage-widget#readme",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "index.js",
+    "client.js",
+    "lib",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "meta": {
+    "title": "用量与余额",
+    "description": "在侧边栏左下角显示账号余额、今日 token 消耗与今日花费"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  }
+}

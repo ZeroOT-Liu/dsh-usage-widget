@@ -1,0 +1,51 @@
+# Publishes the installable bundle whenever a version tag is pushed.
+#
+# The release asset is deliberately renamed to `dsh-usage-widget.tgz` so that
+# the stable `releases/latest/download/dsh-usage-widget.tgz` URL keeps working
+# across versions — that URL is what the README tells users to install from.
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify before publishing
+        run: |
+          node --check index.js
+          node --check client.js
+          for file in lib/*.js; do node --check "$file"; done
+          node test/run-tests.mjs
+          node test/client-smoke.mjs
+
+      - name: Pack the bundle
+        run: |
+          npm pack
+          mv dsh-usage-widget-*.tgz dsh-usage-widget.tgz
+          tar -tzf dsh-usage-widget.tgz
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Idempotent: re-pushing a tag replaces the asset instead of failing.
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dsh-usage-widget.tgz --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dsh-usage-widget.tgz \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi

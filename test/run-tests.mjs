@@ -1,0 +1,273 @@
+/**
+ * Verification for the usage widget's pure logic and its log reader.
+ *
+ * Run: node test/run-tests.mjs
+ *
+ * The aggregation test does not trust the index: it brute-force decodes every
+ * session artifact in full and compares the totals with what the incremental
+ * index reports, so an incremental-read bug cannot pass unnoticed.
+ */
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import fsp from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import zlib from 'node:zlib'
+
+import { decodeCompleteFrames, parseJsonl, scanZstdFrames } from '../lib/session-log.js'
+import { isPeak, modelCost, resolveModelKey, DEFAULT_ALIASES, DEFAULT_PRICES } from '../lib/pricing.js'
+import { UsageIndex, localDayKey, resolveSessionsDir } from '../lib/usage-index.js'
+import { bucketView } from '../lib/service.js'
+import { normalizeConfig } from '../lib/config.js'
+
+let passed = 0
+let failed = 0
+
+function test(name, fn) {
+  try {
+    fn()
+    passed += 1
+    console.log(`  ok   ${name}`)
+  } catch (error) {
+    failed += 1
+    console.log(`  FAIL ${name}\n       ${error?.message ?? error}`)
+  }
+}
+
+async function testAsync(name, fn) {
+  try {
+    await fn()
+    passed += 1
+    console.log(`  ok   ${name}`)
+  } catch (error) {
+    failed += 1
+    console.log(`  FAIL ${name}\n       ${error?.message ?? error}`)
+  }
+}
+
+const frame = (text) => zlib.zstdCompressSync(Buffer.from(text, 'utf8'))
+
+/* ------------------------------------------------------------ session-log */
+
+console.log('\nsession-log')
+
+const messages = [
+  '{"type":"session","id":"session-t","version":4}',
+  '{"type":"assistant/message","time":1000,"data":{"usage":{"inputTokens":10,"outputTokens":2},"message":{"source":{"model":"m"}}}}',
+  '{"type":"assistant/message","time":2000,"data":{"usage":{"inputTokens":20,"outputTokens":4},"message":{"source":{"model":"m"}}}}',
+]
+const multipart = Buffer.concat(messages.map((line) => frame(`${line}\n`)))
+
+test('every concatenated frame is located', () => {
+  assert.equal(scanZstdFrames(multipart).frames.length, 3)
+  assert.equal(scanZstdFrames(multipart).tornStart, undefined)
+})
+
+test('all frames decode, not just the first', () => {
+  const { text, consumed, torn } = decodeCompleteFrames(multipart)
+  assert.equal(torn, false)
+  assert.equal(consumed, multipart.length)
+  assert.equal(parseJsonl(text).length, 3)
+})
+
+test('a partially written frame stays unconsumed', () => {
+  const torn = multipart.subarray(0, multipart.length - 5)
+  const { text, consumed, torn: isTorn } = decodeCompleteFrames(torn)
+  assert.equal(isTorn, true)
+  assert.equal(consumed, multipart.length - frame(`${messages[2]}\n`).length)
+  assert.equal(parseJsonl(text).length, 2, 'only the two complete frames are read')
+})
+
+test('parseJsonl drops an unparseable tail line', () => {
+  assert.equal(parseJsonl('{"a":1}\n{"a":\n').length, 1)
+})
+
+/* ---------------------------------------------------------------- pricing */
+
+console.log('\npricing')
+
+const beijing = (iso) => Date.parse(iso)
+
+test('weekday business hours are peak (Beijing time)', () => {
+  assert.equal(isPeak(beijing('2026-10-16T02:00:00Z')), true, 'Fri 10:00 +08:00')
+  assert.equal(isPeak(beijing('2026-10-16T06:00:00Z')), true, 'Fri 14:00 +08:00')
+})
+
+test('lunch break, evenings and weekends are off-peak', () => {
+  assert.equal(isPeak(beijing('2026-10-16T04:00:00Z')), false, 'Fri 12:00 +08:00')
+  assert.equal(isPeak(beijing('2026-10-16T11:00:00Z')), false, 'Fri 19:00 +08:00')
+  assert.equal(isPeak(beijing('2026-10-17T02:00:00Z')), false, 'Sat 10:00 +08:00')
+  assert.equal(isPeak(beijing('2026-10-16T00:30:00Z')), false, 'Fri 08:30 +08:00')
+})
+
+test('legacy model ids resolve to a priced key', () => {
+  assert.equal(resolveModelKey('deepseek-v4-flash-vision-exp', DEFAULT_PRICES, DEFAULT_ALIASES), 'deepseek-flash')
+  assert.equal(resolveModelKey('deepseek-v4-pro', DEFAULT_PRICES, DEFAULT_ALIASES), 'deepseek-v4-pro')
+  assert.equal(resolveModelKey('deepseek-flash', DEFAULT_PRICES, DEFAULT_ALIASES), 'deepseek-flash')
+  assert.equal(resolveModelKey('some-other-model', DEFAULT_PRICES, DEFAULT_ALIASES), null)
+})
+
+test('cost follows the published table, peak at twice off-peak', () => {
+  const price = DEFAULT_PRICES['deepseek-flash']
+  const oneMillionOffPeak = { peak: { input: 0, cacheRead: 0, output: 0 }, offPeak: { input: 1e6, cacheRead: 0, output: 0 } }
+  assert.equal(modelCost(oneMillionOffPeak, price, 2), 1)
+  const oneMillionPeak = { peak: { input: 1e6, cacheRead: 0, output: 0 }, offPeak: { input: 0, cacheRead: 0, output: 0 } }
+  assert.equal(modelCost(oneMillionPeak, price, 2), 2)
+  const cached = { peak: { input: 0, cacheRead: 0, output: 0 }, offPeak: { input: 0, cacheRead: 1e6, output: 0 } }
+  assert.equal(modelCost(cached, price, 2), 0.02)
+  const output = { peak: { input: 0, cacheRead: 0, output: 0 }, offPeak: { input: 0, cacheRead: 0, output: 1e6 } }
+  assert.equal(modelCost(output, price, 2), 4)
+})
+
+test('config normalization falls back to defaults and clamps', () => {
+  const settings = normalizeConfig({ refreshSeconds: 1, peakMultiplier: 99, models: { bad: { cacheMiss: 0 } } })
+  assert.equal(settings.refreshSeconds, 5)
+  assert.equal(settings.peakMultiplier, 10)
+  assert.equal(settings.currency, 'CNY')
+  assert.deepEqual(settings.models, DEFAULT_PRICES, 'an all-invalid price table keeps the defaults')
+})
+
+/* ----------------------------------------------------- incremental index */
+
+console.log('\nincremental index')
+
+async function syntheticTest() {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-uw-'))
+  const dir = path.join(root, '--fake--', 'session-syn-1')
+  await fsp.mkdir(dir, { recursive: true })
+  const file = path.join(dir, 'session.v4.jsonl.zstd')
+
+  const now = Date.now()
+  const first = Buffer.concat([
+    frame('{"type":"session","id":"session-syn-1","version":4}\n'),
+    frame(
+      `{"type":"assistant/message","time":${now - 60000},"data":{"usage":{"inputTokens":1000,"cacheReadTokens":500,"outputTokens":100,"reasoningTokens":10},"message":{"source":{"model":"deepseek-v4-pro"}}}}\n`,
+    ),
+  ])
+  await fsp.writeFile(file, first)
+
+  const index = new UsageIndex({ sessionsDir: root })
+  await index.refresh()
+  const dayKey = localDayKey(now)
+  const firstPass = index.bucketFor(dayKey)
+  assert.equal(firstPass.bucket.inputTokens, 1000)
+  assert.equal(firstPass.bucket.cacheReadTokens, 500)
+  assert.equal(firstPass.bucket.outputTokens, 100)
+  assert.equal(firstPass.bucket.requests, 1)
+  assert.equal(firstPass.sessions, 1)
+  assert.equal(index.sessionIds()[0], 'session-syn-1', 'session id comes from the header record')
+
+  // A second refresh with no new bytes must not change anything.
+  await index.refresh()
+  assert.equal(index.bucketFor(dayKey).bucket.inputTokens, 1000)
+
+  // Append one more frame: it is counted exactly once, across two refreshes.
+  const second = frame(
+    `{"type":"assistant/message","time":${now - 30000},"data":{"usage":{"inputTokens":200,"cacheReadTokens":0,"outputTokens":30},"message":{"source":{"model":"deepseek-flash"}}}}\n`,
+  )
+  await fsp.appendFile(file, second)
+  await index.refresh()
+  const secondPass = index.bucketFor(dayKey)
+  assert.equal(secondPass.bucket.inputTokens, 1200)
+  assert.equal(secondPass.bucket.requests, 2, 'appended frame counted exactly once')
+
+  // Appending a half-written frame must not be counted before it is complete.
+  const third = frame(
+    `{"type":"assistant/message","time":${now - 10000},"data":{"usage":{"inputTokens":7,"outputTokens":1},"message":{"source":{"model":"deepseek-flash"}}}}\n`,
+  )
+  await fsp.appendFile(file, third.subarray(0, third.length - 6))
+  await index.refresh()
+  assert.equal(index.bucketFor(dayKey).bucket.requests, 2, 'torn frame ignored')
+
+  await fsp.appendFile(file, third.subarray(third.length - 6))
+  await index.refresh()
+  assert.equal(index.bucketFor(dayKey).bucket.requests, 3, 'torn frame counted once it completes')
+  assert.equal(index.bucketFor(dayKey).bucket.inputTokens, 1207)
+
+  const sessionView = index.bucketFor(dayKey, 'session-syn-1')
+  assert.equal(sessionView.sessions, 1)
+
+  // A different session id must not see this session's usage.
+  assert.equal(index.bucketFor(dayKey, 'session-other').sessions, 0)
+
+  await assertBucketView(index, dayKey)
+  await fsp.rm(root, { recursive: true, force: true })
+}
+
+/** The wire projection must split costs per model and flag unpriced models. */
+async function assertBucketView(index, dayKey) {
+  const settings = normalizeConfig({})
+  const view = bucketView(index.bucketFor(dayKey).bucket, settings)
+  assert.equal(view.totalTokens, 1207 + 500 + 131)
+  assert.equal(view.costComplete, true)
+  assert.equal(view.models.length, 2)
+  const pro = view.models.find((entry) => entry.model === 'deepseek-v4-pro')
+  const flash = view.models.find((entry) => entry.model === 'deepseek-flash')
+  assert.ok(pro.priced && flash.priced)
+  assert.ok(view.cost > 0)
+
+  const unpriced = bucketView(
+    { ...index.bucketFor(dayKey).bucket, models: { 'mystery-model': pro ? { ...pro, model: 'mystery-model' } : {} } },
+    settings,
+  )
+  assert.equal(unpriced.costComplete, false)
+  assert.deepEqual(unpriced.unpricedModels, ['mystery-model'])
+}
+
+/* ------------------------------------------------- real session artifacts */
+
+console.log('\nreal session artifacts')
+
+async function realLogTest() {
+  const sessionsDir = resolveSessionsDir(null)
+  if (!fs.existsSync(sessionsDir)) {
+    console.log(`  skip no sessions directory at ${sessionsDir}`)
+    return
+  }
+  const index = new UsageIndex({ sessionsDir })
+  await index.refresh()
+  const stats = index.stats()
+  if (stats.files === 0) {
+    console.log(`  skip no session artifacts in ${sessionsDir}`)
+    return
+  }
+
+  // Independent brute-force pass: decode every artifact in full.
+  const files = await index.listFiles()
+  const dayKey = localDayKey(Date.now())
+  const brute = { requests: 0, input: 0, cacheRead: 0, output: 0 }
+  for (const file of files) {
+    const buffer = await fsp.readFile(file)
+    const { frames } = scanZstdFrames(buffer)
+    const text = Buffer.concat(frames.map(({ start, end }) => zlib.zstdDecompressSync(buffer.subarray(start, end)))).toString('utf8')
+    for (const record of parseJsonl(text)) {
+      if (record?.type !== 'assistant/message') continue
+      const usage = record.data?.usage
+      const timeMs = Number(record.time) || Number(record.data?.time)
+      if (usage === null || typeof usage !== 'object') continue
+      if (!Number.isFinite(timeMs) || localDayKey(timeMs) !== dayKey) continue
+      brute.requests += 1
+      brute.input += Number(usage.inputTokens) || 0
+      brute.cacheRead += Number(usage.cacheReadTokens) || 0
+      brute.output += Number(usage.outputTokens) || 0
+    }
+  }
+
+  const indexed = index.bucketFor(dayKey).bucket
+  assert.equal(indexed.requests, brute.requests, 'request count matches a full decode')
+  assert.equal(indexed.inputTokens, brute.input, 'uncached input matches')
+  assert.equal(indexed.cacheReadTokens, brute.cacheRead, 'cache-read input matches')
+  assert.equal(indexed.outputTokens, brute.output, 'output matches')
+
+  const view = bucketView(indexed, normalizeConfig({}))
+  console.log(
+    `  info files=${stats.files} sessions=${index.sessionIds().length} today requests=${view.requests} tokens=${view.totalTokens} cost=${view.cost} ${view.costComplete ? '' : `(unpriced: ${view.unpricedModels.join(',')})`}`,
+  )
+  assert.ok(view.totalTokens === view.inputTokens + view.cacheReadTokens + view.outputTokens)
+}
+
+await testAsync('synthetic multi-frame append, torn frame and per-model cost', syntheticTest)
+await testAsync('indexed usage equals a full brute-force decode of the real logs', realLogTest)
+
+console.log(`\n${passed} passed, ${failed} failed`)
+process.exit(failed === 0 ? 0 : 1)

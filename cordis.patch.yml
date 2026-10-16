@@ -1,0 +1,26 @@
+# dsh-usage-widget：侧边栏左下角的余额与今日用量部件。
+# `models` 下的价格单位是「元 / 百万 tokens」，填的是**空闲时段**价格；
+# 高峰时段按 peakMultiplier 倍计算（默认 2 倍，与 DeepSeek 官方价目表一致）。
+- insert:
+    - id: dsh-usage-widget
+      name: dsh-usage-widget
+      config:
+        currency: CNY
+        refreshSeconds: 30
+        balanceRefreshSeconds: 180
+        peakMultiplier: 2
+        sessionsDir: null
+        aliases:
+          deepseek-v4-flash: deepseek-flash
+          deepseek-v4-flash-vision-exp: deepseek-flash
+          deepseek-v4.1-flash: deepseek-flash
+          deepseek-v4-pro-0813: deepseek-v4-pro
+        models:
+          deepseek-flash:
+            cacheHit: 0.02
+            cacheMiss: 1
+            output: 4
+          deepseek-v4-pro:
+            cacheHit: 0.15
+            cacheMiss: 4.5
+            output: 13.5
