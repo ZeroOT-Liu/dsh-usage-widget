@@ -109,6 +109,18 @@ node test/client-smoke.mjs   # 在 Node 中按真实握手加载并渲染客户�
 - 会话日志为 Zstandard 多帧格式，需要宿主自带 Node ≥ 22.15（DSH 运行时为 Node 24，无需额外处理）。
 - 未登录 DeepSeek 账号时余额显示「未登录」，用量与花费照常统计。
 
+## 常见问题
+
+**安装时报 `UNABLE_TO_VERIFY_LEAF_SIGNATURE` / `fetch failed`** —— 本机装了 TLS 拦截代理（企业网络、杀毒软件、抓包工具），而 Node 默认只用内置根证书。让 Node 改用系统证书库即可：
+
+```bash
+NODE_OPTIONS="--use-system-ca" dsh plugin --profile desktop add "https://github.com/ZeroOT-Liu/dsh-usage-widget/releases/latest/download/dsh-usage-widget.tgz"
+```
+
+**余额位置显示「账号服务不可用」** —— 该 profile 没有组合官方账号插件；用量与花费照常工作。
+
+**花费与实际账单对不上** —— 价格是配置里的推算值，官方调价后需要更新 `cordis.patch.yml` 中的 `models`。
+
 ## License
 
 [MIT](LICENSE)
