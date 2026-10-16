@@ -46,6 +46,7 @@ jobs:
           for file in lib/*.js; do node --check "$file"; done
           node test/run-tests.mjs
           node test/client-smoke.mjs
+          node test/host-smoke.mjs
 
       - name: Pack the bundle
         run: |
