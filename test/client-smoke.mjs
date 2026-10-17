@@ -174,6 +174,15 @@ const PAYLOAD = {
     refreshSeconds: 30,
     balanceRefreshSeconds: 180,
     showMonth: true,
+    showWindow: true,
+  },
+  // The host's own clock and its pricing-window verdict: the client must not
+  // decide either of these for itself.
+  hostNow: 1792110729081,
+  window: {
+    phase: 'peak',
+    changesAt: 1792110729081 + 90 * 60 * 1000,
+    nextPhase: 'offpeak',
   },
   diagnostics: {},
 }
@@ -521,6 +530,44 @@ await check('the month line can be turned off from config', async () => {
   publishSession('session-toggle')
   const on = await render({ wide: true, t: (key) => key })
   assert.ok(textOf(on).includes('204.52M'), 'month line returns when showMonth is true')
+})
+
+/* `showWindow` is read from the fetched payload too, so it also needs a fresh
+ * mount. The badge must stay on the today line and the window row must carry
+ * the multiplier and the countdown the host computed. */
+await check('the peak/off-peak badge is shown and can be turned off from config', async () => {
+  sandbox.__payload = PAYLOAD
+  unmount()
+  publishSession('session-window')
+  const on = await render({ wide: true, t: (key) => key })
+  const text = textOf(on)
+  assert.match(text, /peakLabel\s*×2/, `the peak badge carries the multiplier: ${text.slice(0, 160)}`)
+  assert.match(
+    text,
+    /peakLabel\s*×2\s+today\s+20\.34M/,
+    `the badge precedes the today figure, not the month line: ${text.slice(0, 160)}`,
+  )
+  // The row must be taken from the tree currently mounted, not from an earlier
+  // one: the expand click only affects live hook state.
+  const clickTargetForWindow = find(on, (node) => node.props?.className === 'dsh-uw_row')
+  assert.ok(clickTargetForWindow, 'the summary row is present in the fresh tree')
+
+  clickTargetForWindow.props.onClick()
+  const expanded = await render({ wide: true, t: (key) => key })
+  const panelText = textOf(expanded)
+  assert.match(panelText, /window\s+peakLabel/, `the window row names the current phase: ${panelText.slice(0, 220)}`)
+  assert.ok(panelText.includes('offPeakLabel'), 'the window row names the phase that follows')
+  assert.match(panelText, /switchIn\s+1h 30m/, `the countdown comes from host instants: ${panelText.slice(0, 260)}`)
+
+  sandbox.__payload = { ...PAYLOAD, pricing: { ...PAYLOAD.pricing, showWindow: false } }
+  unmount()
+  publishSession('session-window')
+  const off = await render({ wide: true, t: (key) => key })
+  const offText = textOf(off)
+  assert.ok(!offText.includes('peakLabel'), 'no badge when showWindow is false')
+  assert.ok(offText.includes('20.34M'), 'the today figure stays')
+
+  sandbox.__payload = PAYLOAD
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

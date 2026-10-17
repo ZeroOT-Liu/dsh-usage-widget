@@ -47,6 +47,11 @@ window.__ModuleLoader__.load({
       balanceSignedOut: '未登录',
       balanceFailed: '余额查询失败',
       unpriced: '未配置单价，未计入花费',
+      window: '当前时段',
+      peakLabel: '高峰时段',
+      offPeakLabel: '空闲时段',
+      switchIn: '距切换',
+      windowHint: '高峰单价 ×{multiplier}（北京时间 周一至周五 9:00–12:00、14:00–18:00），其余时段按半价',
       collapsedHint: '展开侧边栏查看明细',
       none: '—',
     }
@@ -82,6 +87,11 @@ window.__ModuleLoader__.load({
       balanceSignedOut: 'Signed out',
       balanceFailed: 'Balance query failed',
       unpriced: 'No price configured; excluded from cost',
+      window: 'Current window',
+      peakLabel: 'Peak',
+      offPeakLabel: 'Off-peak',
+      switchIn: 'switches in',
+      windowHint: 'Peak prices are ×{multiplier} (Beijing time, Mon–Fri 09:00–12:00 and 14:00–18:00); other hours are half price',
       collapsedHint: 'Expand the sidebar for details',
       none: '—',
     }
@@ -105,6 +115,18 @@ window.__ModuleLoader__.load({
 .dsh-uw_line--dim { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
 .dsh-uw_sep { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
 .dsh-uw_line--alert { color: var(--dsw-alias-state-warn-label, #d9a441); }
+/* The live peak/off-peak badge: an inline chip that keeps the window visible
+   while the footer is collapsed. Peak is the exception that costs more, so it
+   takes the warning colour and off-peak stays quiet. */
+.dsh-uw_badge {
+  display: inline-block; margin-right: 4px; padding: 0 4px; border-radius: var(--dsw-radius-xs, 4px);
+  font-size: calc(var(--dsw-font-xs-13-font-size, 12px) - 1px);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.14));
+}
+.dsh-uw_badge--peak { color: var(--dsw-alias-state-warn-label, #d9a441); }
+.dsh-uw_badge--offpeak { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
+.dsh-uw_badgeValue { font-variant-numeric: tabular-nums; }
+.dsh-uw_hint { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
 .dsh-uw_narrow { display: flex; align-items: center; justify-content: center; padding: 6px 0; }
 .dsh-uw_panel {
   margin: 0 0 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px;
@@ -189,6 +211,62 @@ window.__ModuleLoader__.load({
       if (!Number.isFinite(ms) || ms <= 0) return '—'
       const date = new Date(ms)
       return `${date.getHours() < 10 ? '0' : ''}${date.getHours()}:${date.getMinutes() < 10 ? '0' : ''}${date.getMinutes()}`
+    }
+
+    /** Compact countdown, e.g. `2h 05m`, `45m`, `<1m`. */
+    function formatDuration(ms) {
+      if (!Number.isFinite(ms) || ms <= 0) return '0m'
+      const minutes = Math.round(ms / 60000)
+      if (minutes < 1) return '<1m'
+      const hours = Math.floor(minutes / 60)
+      const rest = minutes % 60
+      if (hours === 0) return `${rest}m`
+      if (rest === 0) return `${hours}h`
+      return `${hours}h ${rest < 10 ? '0' : ''}${rest}m`
+    }
+
+    /**
+     * Describe the pricing window the host reported.
+     *
+     * The host decides whether the current window is peak, so nothing here
+     * compares clocks or timezones; the browser only turns the two instants it
+     * was handed into a countdown, which stays correct even if the machine's
+     * own clock or timezone is wrong.
+     *
+     * @param payload - the summary payload.
+     * @param t - translate function.
+     * @returns view fields, or null when the window must not be shown.
+     */
+    function windowView(payload, t) {
+      const window = payload?.window
+      if (window === null || typeof window !== 'object') return null
+      if (payload?.pricing?.showWindow === false) return null
+      const peak = window.phase === 'peak'
+      const multiplier = Number(payload?.pricing?.peakMultiplier)
+      const remaining = Number(window.changesAt) - Number(payload?.hostNow)
+      return {
+        peak,
+        label: peak ? t('peakLabel') : t('offPeakLabel'),
+        // Peak is the only window that costs more, so it is the only one worth
+        // showing a multiplier for in the badge itself.
+        badgeText: peak && Number.isFinite(multiplier) ? `×${trimFixed(multiplier, 2)}` : '',
+        multiplierText: Number.isFinite(multiplier) ? `×${trimFixed(multiplier, 2)}` : '—',
+        nextLabel: window.nextPhase === 'peak' ? t('peakLabel') : t('offPeakLabel'),
+        countdown: Number.isFinite(remaining) && remaining > 0 ? formatDuration(remaining) : '',
+        hint: t('windowHint').replace('{multiplier}', Number.isFinite(multiplier) ? trimFixed(multiplier, 2) : '2'),
+      }
+    }
+
+    /** The inline chip that keeps the current window visible while collapsed. */
+    function WindowBadge(props) {
+      const view = props.view
+      if (view === null || view === undefined) return null
+      return h(
+        'span',
+        { className: `dsh-uw_badge dsh-uw_badge--${view.peak ? 'peak' : 'offpeak'}` },
+        view.label,
+        view.badgeText.length > 0 ? h('span', { className: 'dsh-uw_badgeValue' }, ` ${view.badgeText}`) : null,
+      )
     }
 
     /**
@@ -358,12 +436,30 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dsh-uw_group' }, children)
     }
 
+    /** The pricing window in force, with the countdown to the next one. */
+    function WindowBlock(props) {
+      const { view, t } = props
+      if (view === null || view === undefined) return null
+      const children = [
+        h(KeyValue, { key: 'phase', strong: true, label: t('window'), value: view.label }),
+        h(KeyValue, { key: 'mult', label: t('peakLabel'), value: view.multiplierText }),
+      ]
+      if (view.countdown.length > 0) {
+        children.push(
+          h(KeyValue, { key: 'next', label: t('switchIn'), value: `${view.countdown} → ${view.nextLabel}` }),
+        )
+      }
+      children.push(h('div', { key: 'hint', className: 'dsh-uw_hint' }, view.hint))
+      return h('div', { className: 'dsh-uw_group' }, children)
+    }
+
     function UsagePanel(props) {
       const { data, t, currency, sessionId, onRefresh, busy } = props
       const today = data?.today ?? null
       const session = data?.session ?? null
       const models = Array.isArray(today?.models) ? today.models : []
       const timestamp = Number.isFinite(data?.updatedAt) ? formatClock(data.updatedAt) : '—'
+      const windowInfo = windowView(data, t)
 
       const groups = [
         h('div', { className: 'dsh-uw_head', key: 'head' }, [
@@ -371,6 +467,8 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dsh-uw_headDay', key: 'day' }, today?.dayKey ?? ''),
         ]),
         h('div', { key: 'balance' }, h(BalanceBlock, { balance: data?.balance, t, currency })),
+        windowInfo === null ? null : h('div', { className: 'dsh-uw_divider', key: 'd0' }),
+        windowInfo === null ? null : h('div', { key: 'window' }, h(WindowBlock, { view: windowInfo, t })),
         h('div', { className: 'dsh-uw_divider', key: 'd1' }),
         h('div', { key: 'today' }, h(UsageBlock, { view: today, t, currency })),
       ]
@@ -569,6 +667,9 @@ window.__ModuleLoader__.load({
         const month = data?.month ?? null
         const showMonth = data?.pricing?.showMonth !== false
         const balance = data?.balance ?? null
+        // The current pricing window, or null when the host did not report one
+        // (an older host half) or the user turned the badge off.
+        const windowInfo = windowView(data, translate)
 
         const balanceWalletParts = walletParts(balance, currency, translate)
         const balanceText = walletText(balanceWalletParts)
@@ -578,17 +679,33 @@ window.__ModuleLoader__.load({
         const figure = (view) =>
           `${formatTokens(view.totalTokens)} ${translate('tokens')} · ${formatMoney(view.cost, currency)}`
 
+        // Computed only when there is a day to describe: `figure` dereferences
+        // the view, so a null `today` must not reach it.
+        const todayText = today === null ? '' : `${translate('today')} ${figure(today)}`
         const summaryLine = today
-          ? `${translate('today')} ${figure(today)}`
+          ? todayText
           : error !== null
             ? `${translate('error')}`
             : translate('loading')
+        // The badge rides the today line so the window stays visible in the
+        // collapsed footer, where there is no room for a fourth line.
+        const summaryChildren =
+          today !== null && windowInfo !== null
+            ? [h(WindowBadge, { key: 'window', view: windowInfo }), h('span', { key: 'text' }, todayText)]
+            : summaryLine
 
         const monthFigure = showMonth && month !== null ? figure(month) : null
         const monthLine = monthFigure === null ? null : `${translate('thisMonth')} ${monthFigure}`
 
         const tooltip = [
           `${translate('balance')}: ${balanceText}`,
+          ...(windowInfo === null
+            ? []
+            : [
+                `${translate('window')}: ${windowInfo.label}${windowInfo.badgeText.length > 0 ? ` ${windowInfo.badgeText}` : ''}${
+                  windowInfo.countdown.length > 0 ? ` · ${translate('switchIn')} ${windowInfo.countdown}` : ''
+                }`,
+              ]),
           `${translate('today')}: ${today === null ? summaryLine : figure(today)}`,
           ...(monthFigure === null ? [] : [`${translate('thisMonth')}: ${monthFigure}`]),
           translate('collapsedHint'),
@@ -620,7 +737,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dsh-uw_icon', key: 'icon' }, h(UsageIcon, { size: 16 })),
           h('span', { className: 'dsh-uw_lines', key: 'lines' }, [
             h('span', { className: 'dsh-uw_line', key: 'b' }, balanceLineChildren),
-            h('span', { className: `dsh-uw_line${error !== null ? ' dsh-uw_line--alert' : ' dsh-uw_line--dim'}`, key: 't' }, summaryLine),
+            h('span', { className: `dsh-uw_line${error !== null ? ' dsh-uw_line--alert' : ' dsh-uw_line--dim'}`, key: 't' }, summaryChildren),
             monthLine === null ? null : h('span', { className: 'dsh-uw_line dsh-uw_line--dim', key: 'm' }, monthLine),
           ]),
         ]

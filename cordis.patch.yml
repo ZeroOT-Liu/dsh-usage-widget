@@ -1,6 +1,7 @@
 # dsh-usage-widget：侧边栏左下角的余额与今日用量部件。
 # `models` 下的价格单位是「元 / 百万 tokens」，填的是**空闲时段**价格；
 # 高峰时段按 peakMultiplier 倍计算（默认 2 倍，与 DeepSeek 官方价目表一致）。
+# showWindow：是否在「今日」那一行前显示当前时段徽标（高峰时段 ×2 / 空闲时段）。
 - insert:
     - id: dsh-usage-widget
       name: dsh-usage-widget
@@ -9,6 +10,7 @@
         refreshSeconds: 30
         balanceRefreshSeconds: 180
         peakMultiplier: 2
+        showWindow: true
         sessionsDir: null
         aliases:
           deepseek-v4-flash: deepseek-flash

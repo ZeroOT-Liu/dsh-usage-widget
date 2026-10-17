@@ -15,7 +15,7 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 
 import { decodeCompleteFrames, parseJsonl, scanZstdFrames } from '../lib/session-log.js'
-import { isPeak, modelCost, resolveModelKey, DEFAULT_ALIASES, DEFAULT_PRICES } from '../lib/pricing.js'
+import { isPeak, currentWindow, modelCost, resolveModelKey, DEFAULT_ALIASES, DEFAULT_PRICES } from '../lib/pricing.js'
 import { UsageIndex, localDayKey, localMonthKey, resolveSessionsDir } from '../lib/usage-index.js'
 import { bucketView } from '../lib/service.js'
 import { normalizeConfig } from '../lib/config.js'
@@ -98,6 +98,56 @@ test('lunch break, evenings and weekends are off-peak', () => {
   assert.equal(isPeak(beijing('2026-10-16T11:00:00Z')), false, 'Fri 19:00 +08:00')
   assert.equal(isPeak(beijing('2026-10-17T02:00:00Z')), false, 'Sat 10:00 +08:00')
   assert.equal(isPeak(beijing('2026-10-16T00:30:00Z')), false, 'Fri 08:30 +08:00')
+})
+
+/* The current-window description is what the widget turns into a live badge, so
+ * it is asserted on the Beijing wall clock rather than on raw epoch numbers. */
+const beijingParts = (timeMs) => {
+  const shifted = new Date(timeMs + 8 * 60 * 60 * 1000)
+  const pad = (value) => (value < 10 ? `0${value}` : String(value))
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}T${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`
+}
+
+test('the current window reports peak inside business hours', () => {
+  const window = currentWindow(beijing('2026-10-16T02:00:00Z')) // Fri 10:00 +08:00
+  assert.equal(window.phase, 'peak')
+  assert.equal(window.nextPhase, 'offpeak')
+  assert.equal(beijingParts(window.changesAt), '2026-10-16T12:00', 'peak ends at the lunch break')
+})
+
+test('the current window reports off-peak with the next peak opening', () => {
+  const lunch = currentWindow(beijing('2026-10-16T04:00:00Z')) // Fri 12:00 +08:00
+  assert.equal(lunch.phase, 'offpeak')
+  assert.equal(lunch.nextPhase, 'peak')
+  assert.equal(beijingParts(lunch.changesAt), '2026-10-16T14:00', 'the afternoon window opens next')
+
+  const evening = currentWindow(beijing('2026-10-16T11:00:00Z')) // Fri 19:00 +08:00
+  assert.equal(evening.phase, 'offpeak')
+  assert.equal(beijingParts(evening.changesAt), '2026-10-19T09:00', 'Friday evening waits for Monday')
+})
+
+test('the current window skips the weekend to the next trading window', () => {
+  const saturday = currentWindow(beijing('2026-10-17T02:00:00Z')) // Sat 10:00 +08:00
+  assert.equal(saturday.phase, 'offpeak')
+  assert.equal(saturday.nextPhase, 'peak')
+  assert.equal(beijingParts(saturday.changesAt), '2026-10-19T09:00', 'Saturday waits for Monday')
+
+  const sunday = currentWindow(beijing('2026-10-18T10:00:00Z')) // Sun 18:00 +08:00
+  assert.equal(sunday.phase, 'offpeak')
+  assert.equal(beijingParts(sunday.changesAt), '2026-10-19T09:00', 'Sunday waits for Monday')
+
+  const mondayMorning = currentWindow(beijing('2026-10-19T01:00:00Z')) // Mon 09:00 +08:00
+  assert.equal(mondayMorning.phase, 'peak', 'Monday 09:00 is already peak')
+})
+
+test('a window boundary belongs to the window that starts there', () => {
+  const atStart = currentWindow(beijing('2026-10-16T06:00:00Z')) // Fri 14:00 sharp
+  assert.equal(atStart.phase, 'peak', 'the afternoon window is open at its first minute')
+  assert.equal(beijingParts(atStart.changesAt), '2026-10-16T18:00')
+
+  const atEnd = currentWindow(beijing('2026-10-16T10:00:00Z')) // Fri 18:00 sharp
+  assert.equal(atEnd.phase, 'offpeak', 'the window is closed at its end minute')
+  assert.equal(beijingParts(atEnd.changesAt), '2026-10-19T09:00')
 })
 
 test('legacy model ids resolve to a priced key', () => {
