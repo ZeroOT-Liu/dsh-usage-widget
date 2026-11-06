@@ -14,11 +14,11 @@ import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 
-import { decodeCompleteFrames, parseJsonl, scanZstdFrames } from '../lib/session-log.js'
+import { decodeCompleteFrames, decodeTextChunk, parseJsonl, scanZstdFrames } from '../lib/session-log.js'
 import { isPeak, currentWindow, modelCost, resolveModelKey, DEFAULT_ALIASES, DEFAULT_PRICES } from '../lib/pricing.js'
 import { UsageIndex, localDayKey, localMonthKey, resolveSessionsDir } from '../lib/usage-index.js'
-import { bucketView } from '../lib/service.js'
-import { normalizeConfig } from '../lib/config.js'
+import { bucketView, createUsageService, withTimeout } from '../lib/service.js'
+import { normalizeConfig, VERSION } from '../lib/config.js'
 
 let passed = 0
 let failed = 0
@@ -80,6 +80,28 @@ test('a partially written frame stays unconsumed', () => {
 
 test('parseJsonl drops an unparseable tail line', () => {
   assert.equal(parseJsonl('{"a":1}\n{"a":\n').length, 1)
+})
+
+/* A plain `.jsonl` artifact carries no frames. Whole lines are consumed and a
+ * half-written tail waits for the next refresh, exactly like a torn frame.
+ * This format used to be handed to the Zstandard scanner, which threw on every
+ * refresh and left the artifact permanently unreadable. */
+test('an uncompressed artifact yields only its complete lines', () => {
+  const { text, consumed, torn } = decodeTextChunk(Buffer.from('{"a":1}\n{"b":2}\n{"c":', 'utf8'))
+  assert.equal(text, '{"a":1}\n{"b":2}\n')
+  assert.equal(consumed, Buffer.byteLength('{"a":1}\n{"b":2}\n'))
+  assert.equal(torn, true, 'the unfinished line is left for the next pass')
+})
+
+test('an unfinished first line is not consumed at all', () => {
+  const chunk = decodeTextChunk(Buffer.from('{"a":', 'utf8'))
+  assert.equal(chunk.consumed, 0, 'nothing is consumed without a newline')
+  assert.equal(chunk.text, '')
+  assert.equal(chunk.torn, true)
+})
+
+test('arbitrary bytes are still reported as corruption, not parsed as a log', () => {
+  assert.throws(() => decodeCompleteFrames(Buffer.from('this is not zstandard')), /invalid Zstandard frame magic/)
 })
 
 /* ---------------------------------------------------------------- pricing */
@@ -517,9 +539,101 @@ async function realLogTest() {
   assert.ok(view.totalTokens === view.inputTokens + view.cacheReadTokens + view.outputTokens)
 }
 
+/* ------------------------------------------------------ plain jsonl logs */
+
+console.log('\nplain jsonl artifacts')
+
+/**
+ * DSH can persist an uncompressed `.jsonl` artifact. The index must read it
+ * with the plain-text reader, honour the same append/torn-line rules as a
+ * compressed frame, and never report it as a decode failure.
+ */
+async function plainLogTest() {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-uw-plain-'))
+  const dir = path.join(root, '--fake--', 'session-plain')
+  await fsp.mkdir(dir, { recursive: true })
+  const file = path.join(dir, 'session.v4.jsonl')
+
+  const now = Date.now()
+  const header = JSON.stringify({ type: 'session', id: 'session-plain', version: 4 })
+  const usage = (input) =>
+    JSON.stringify({
+      type: 'assistant/message',
+      time: now - 1000,
+      data: {
+        usage: { inputTokens: input, cacheReadTokens: 0, outputTokens: 1 },
+        message: { source: { model: 'deepseek-flash' } },
+      },
+    })
+
+  await fsp.writeFile(file, `${header}\n${usage(10)}\n`, 'utf8')
+  const index = new UsageIndex({ sessionsDir: root })
+  await index.refresh()
+
+  test('a plain .jsonl artifact is indexed instead of erroring', () => {
+    assert.equal(index.stats().lastError, null, 'no decode error for an uncompressed artifact')
+    assert.equal(index.bucketFor(localDayKey(now)).bucket.inputTokens, 10)
+    assert.equal(index.sessionIds()[0], 'session-plain')
+  })
+
+  // A line appended without its terminating newline is not complete yet.
+  await fsp.appendFile(file, usage(5), 'utf8')
+  await index.refresh()
+  test('a half-written plain line waits for its newline', () => {
+    assert.equal(index.bucketFor(localDayKey(now)).bucket.requests, 1)
+  })
+
+  await fsp.appendFile(file, '\n', 'utf8')
+  await index.refresh()
+  test('the completed plain line is counted exactly once', () => {
+    assert.equal(index.bucketFor(localDayKey(now)).bucket.requests, 2)
+    assert.equal(index.bucketFor(localDayKey(now)).bucket.inputTokens, 15)
+  })
+
+  await fsp.rm(root, { recursive: true, force: true })
+}
+
+/* ------------------------------------------------------------- robustness */
+
+console.log('\nservice robustness')
+
+await testAsync('the reported client version matches the package manifest', async () => {
+  const manifest = JSON.parse(await fsp.readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(VERSION, manifest.version, 'the version sent to the platform must not drift')
+})
+
+await testAsync('a never-settling platform call is bounded by a deadline', async () => {
+  await assert.rejects(() => withTimeout(new Promise(() => {}), 20), /timed out after 20ms/)
+})
+
+await testAsync('a resolving platform call is passed through unchanged', async () => {
+  assert.equal(await withTimeout(Promise.resolve('ok'), 50), 'ok')
+})
+
+await testAsync('an oversized session id cannot grow the merge cache', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-uw-id-'))
+  const service = createUsageService({
+    ctx: { get: () => null },
+    config: normalizeConfig({ sessionsDir: root }),
+    logger: null,
+  })
+  const payload = await service.summary({ sessionId: 'x'.repeat(400) })
+  assert.equal(payload.session.id.length, 128, 'the id is truncated to its bound')
+  assert.equal(payload.version, VERSION)
+
+  const dayKey = localDayKey(Date.now())
+  for (let count = 0; count < 400; count += 1) service.index.bucketFor(dayKey, `session-${count}`)
+  assert.ok(
+    service.index.mergeCache.size <= 256,
+    `merge cache stayed bounded: ${service.index.mergeCache.size}`,
+  )
+  await fsp.rm(root, { recursive: true, force: true })
+})
+
 await testAsync('synthetic multi-frame append, torn frame and per-model cost', syntheticTest)
 await testAsync('month aggregation across days, months and sessions', monthAggregationTest)
 await testAsync('artifact rewrite recovery and diagnostics', rewriteRecoveryTest)
+await testAsync('plain .jsonl artifacts are read with the text decoder', plainLogTest)
 await testAsync('indexed usage equals a full brute-force decode of the real logs', realLogTest)
 
 console.log(`\n${passed} passed, ${failed} failed`)
