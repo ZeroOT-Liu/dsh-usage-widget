@@ -9,6 +9,7 @@
         currency: CNY
         refreshSeconds: 30
         balanceRefreshSeconds: 180
+        balanceTimeoutMs: 10000
         peakMultiplier: 2
         showWindow: true
         sessionsDir: null

@@ -34,6 +34,7 @@ window.__ModuleLoader__.load({
       inputCached: '输入（缓存命中）',
       output: '输出',
       reasoning: '其中推理',
+      cacheHit: '缓存命中率',
       requests: '请求数',
       sessions: '会话数',
       cost: '花费',
@@ -74,6 +75,7 @@ window.__ModuleLoader__.load({
       inputCached: 'Input (cache hit)',
       output: 'Output',
       reasoning: 'of which reasoning',
+      cacheHit: 'Cache hit rate',
       requests: 'Requests',
       sessions: 'Sessions',
       cost: 'Cost',
@@ -207,6 +209,13 @@ window.__ModuleLoader__.load({
       return `${currencySymbol(currency)}${shown}`
     }
 
+    /** Share of the prompt that was served from cache, as a percentage. */
+    function formatPercent(ratio) {
+      if (!Number.isFinite(ratio) || ratio < 0) return '—'
+      const value = Math.min(1, ratio) * 100
+      return `${trimFixed(value, value >= 10 ? 0 : 1)}%`
+    }
+
     function formatClock(ms) {
       if (!Number.isFinite(ms) || ms <= 0) return '—'
       const date = new Date(ms)
@@ -235,15 +244,18 @@ window.__ModuleLoader__.load({
      *
      * @param payload - the summary payload.
      * @param t - translate function.
+     * @param elapsedMs - milliseconds since the payload was received, so the
+     *   countdown keeps falling between two polls instead of freezing at the
+     *   value captured when the host answered.
      * @returns view fields, or null when the window must not be shown.
      */
-    function windowView(payload, t) {
+    function windowView(payload, t, elapsedMs = 0) {
       const window = payload?.window
       if (window === null || typeof window !== 'object') return null
       if (payload?.pricing?.showWindow === false) return null
       const peak = window.phase === 'peak'
       const multiplier = Number(payload?.pricing?.peakMultiplier)
-      const remaining = Number(window.changesAt) - Number(payload?.hostNow)
+      const remaining = Number(window.changesAt) - Number(payload?.hostNow) - Math.max(0, Number(elapsedMs) || 0)
       return {
         peak,
         label: peak ? t('peakLabel') : t('offPeakLabel'),
@@ -343,6 +355,7 @@ window.__ModuleLoader__.load({
       if (view === null || view === undefined) {
         return h('div', { className: 'dsh-uw_kv' }, h('span', { className: 'dsh-uw_k' }, t('noData')))
       }
+      const promptTokens = Number(view.inputTokens ?? 0) + Number(view.cacheReadTokens ?? 0)
       const children = [
         h(KeyValue, {
           key: 'total',
@@ -352,6 +365,13 @@ window.__ModuleLoader__.load({
         }),
         h(KeyValue, { key: 'in', label: t('input'), value: formatInt(view.inputTokens) }),
         h(KeyValue, { key: 'cached', label: t('inputCached'), value: formatInt(view.cacheReadTokens) }),
+        promptTokens > 0
+          ? h(KeyValue, {
+              key: 'hit',
+              label: t('cacheHit'),
+              value: formatPercent(Number(view.cacheReadTokens ?? 0) / promptTokens),
+            })
+          : null,
         h(KeyValue, { key: 'out', label: t('output'), value: formatInt(view.outputTokens) }),
         h(KeyValue, { key: 'reason', label: t('reasoning'), value: formatInt(view.reasoningTokens) }),
         h(KeyValue, { key: 'cost', strong: true, label: t('cost'), value: formatMoney(view.cost, currency) }),
@@ -454,12 +474,12 @@ window.__ModuleLoader__.load({
     }
 
     function UsagePanel(props) {
-      const { data, t, currency, sessionId, onRefresh, busy } = props
+      const { data, t, currency, sessionId, onRefresh, busy, window: windowInfo } = props
       const today = data?.today ?? null
       const session = data?.session ?? null
       const models = Array.isArray(today?.models) ? today.models : []
       const timestamp = Number.isFinite(data?.updatedAt) ? formatClock(data.updatedAt) : '—'
-      const windowInfo = windowView(data, t)
+      const version = typeof data?.version === 'string' && data.version.length > 0 ? `v${data.version}` : ''
 
       const groups = [
         h('div', { className: 'dsh-uw_head', key: 'head' }, [
@@ -537,7 +557,7 @@ window.__ModuleLoader__.load({
 
       groups.push(
         h('div', { className: 'dsh-uw_foot', key: 'foot' }, [
-          h('span', { key: 'ts' }, `${t('updated')} ${timestamp}`),
+          h('span', { key: 'ts' }, `${t('updated')} ${timestamp}${version.length > 0 ? ` · ${version}` : ''}`),
           h(
             'button',
             { type: 'button', className: 'dsh-uw_refresh', onClick: onRefresh, key: 'btn', disabled: busy === true },
@@ -577,6 +597,9 @@ window.__ModuleLoader__.load({
         const [open, setOpen] = React.useState(false)
         const pinned = React.useRef(false)
         const [sessionId, setSessionId] = React.useState('')
+        // Only ever bumped to force a re-render; the clock itself is read from
+        // `Date.now()` so a stalled tick cannot make the countdown lie.
+        const [, setTick] = React.useState(0)
 
         React.useEffect(() => {
           // The host owns the notion of "the session the main view is showing";
@@ -641,7 +664,9 @@ window.__ModuleLoader__.load({
               if (!response.ok) throw new Error(`HTTP ${response.status}`)
               const payload = await response.json()
               if (payload?.ok !== true) throw new Error(payload?.error ?? 'bad payload')
-              setData(payload)
+              // Stamp local arrival so the pricing-window countdown can fall
+              // between polls without trusting the browser's timezone.
+              setData({ ...payload, receivedAt: Date.now() })
               setError(null)
             } catch (cause) {
               setError(String(cause?.message ?? cause))
@@ -662,6 +687,31 @@ window.__ModuleLoader__.load({
           return () => clearInterval(timer)
         }, [load, refreshSeconds])
 
+        // The window countdown is only rendered inside the expanded panel, so
+        // a one-second re-render is only worth paying for while it is open.
+        // Without this the countdown sat frozen at the value the host answered
+        // with and only moved once per poll.
+        //
+        // The same tick re-reads the summary the moment the window boundary is
+        // crossed, so the badge flips on time instead of up to one poll late.
+        // `refreshedBoundary` keeps a late or skewed clock from turning that
+        // into a reload every second.
+        const refreshedBoundary = React.useRef(0)
+        React.useEffect(() => {
+          if (!open) return undefined
+          const timer = setInterval(() => {
+            setTick((value) => value + 1)
+            const boundary = Number(data?.window?.changesAt)
+            if (!Number.isFinite(boundary) || boundary <= 0) return
+            const arrivedAt = Number(data?.hostNow) + (Date.now() - Number(data?.receivedAt))
+            if (arrivedAt >= boundary && refreshedBoundary.current !== boundary) {
+              refreshedBoundary.current = boundary
+              load(true)
+            }
+          }, 1000)
+          return () => clearInterval(timer)
+        }, [open, data, load])
+
         const currency = data?.pricing?.currency ?? 'CNY'
         const today = data?.today ?? null
         const month = data?.month ?? null
@@ -669,7 +719,8 @@ window.__ModuleLoader__.load({
         const balance = data?.balance ?? null
         // The current pricing window, or null when the host did not report one
         // (an older host half) or the user turned the badge off.
-        const windowInfo = windowView(data, translate)
+        const elapsed = Number.isFinite(data?.receivedAt) ? Math.max(0, Date.now() - data.receivedAt) : 0
+        const windowInfo = windowView(data, translate, elapsed)
 
         const balanceWalletParts = walletParts(balance, currency, translate)
         const balanceText = walletText(balanceWalletParts)
@@ -750,6 +801,14 @@ window.__ModuleLoader__.load({
             onMouseLeave: () => {
               if (!pinned.current) setOpen(false)
             },
+            // Escape is the expected way out of a popup for keyboard users;
+            // without it the only exit was clicking the row again.
+            onKeyDown: (event) => {
+              if (event?.key === 'Escape' && open) {
+                pinned.current = false
+                setOpen(false)
+              }
+            },
           },
           open
             ? h(UsagePanel, {
@@ -758,6 +817,7 @@ window.__ModuleLoader__.load({
                 currency,
                 sessionId,
                 busy,
+                window: windowInfo,
                 onRefresh: () => load(true),
               })
             : null,
@@ -767,6 +827,7 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 'dsh-uw_row',
               'aria-expanded': open,
+              'aria-haspopup': 'true',
               'aria-label': translate('title'),
               title: open ? undefined : tooltip,
               onClick: () => {

@@ -98,6 +98,9 @@ const React = {
 
 const PAYLOAD = {
   ok: true,
+  // The host reports its own version; the panel shows it so a user can tell
+  // which build is actually loaded.
+  version: '9.9.9',
   updatedAt: 1792110729081,
   dayKey: '2026-10-16',
   today: {
@@ -480,6 +483,18 @@ await check('clicking expands a panel with balance, month, per-model and session
   assert.ok(text.includes('777'), 'month request count present')
   assert.ok(text.includes('activeDays'), 'active-day count labelled')
   assert.ok(text.includes('190M · ¥10.5'), 'the current session month figure is shown')
+  assert.match(text, /cacheHit\s+98%/, `cache hit rate rendered: ${text.slice(0, 200)}`)
+  assert.ok(text.includes('v9.9.9'), 'the loaded build version is shown')
+  assert.match(text, /switchIn[^]*1h 30m/, `the window countdown is rendered: ${text.slice(0, 300)}`)
+})
+
+await check('Escape closes the expanded panel', async () => {
+  const holder = find(await render({ wide: true, t: (key) => key }), (node) => node.props?.className === 'dsh-uw')
+  assert.ok(holder, 'widget holder found')
+  assert.equal(typeof holder.props.onKeyDown, 'function', 'a keyboard handler is attached')
+  holder.props.onKeyDown({ key: 'Escape' })
+  const collapsed = await render({ wide: true, t: (key) => key })
+  assert.ok(!textOf(collapsed).includes('todayUsage'), 'the panel is closed again')
 })
 
 await check('the stylesheet is injected and its cleanup removes it', () => {

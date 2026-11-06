@@ -7,10 +7,10 @@ English | [中文](README.md)
 Shows the following at the **bottom left of the sidebar** (just above Settings) in the DeepSeek Harness desktop app:
 
 - **Account balance** — read through the official account service `ctx.deepseekAccount.getBalance`, the same source as Settings → Account. Both the topped-up balance and any bonus wallets appear on the first line, without expanding anything.
-- **Today's token usage** — summed across all sessions, with input (cache hit / cache miss) and output broken out, and reasoning tokens listed separately.
+- **Today's token usage** — summed across all sessions, with input (cache hit / cache miss), the cache hit rate and output broken out, and reasoning tokens listed separately.
 - **Today's spend** — derived from per-model prices and the **peak / off-peak** windows. Hover or click to expand the current session's detail.
 - **Month to date** — this month's tokens, spend, request count, active days and session count.
-- **Current pricing window** — a live badge in front of the today figure (`Peak ×2` / `Off-peak`), plus a row in the expanded panel reading "Current window / switches in 1h 30m → Off-peak", so the rate in force and the time until it changes are both visible at a glance.
+- **Current pricing window** — a live badge in front of the today figure (`Peak ×2` / `Off-peak`), plus a row in the expanded panel reading "Current window / switches in 1h 30m → Off-peak", so the rate in force and the time until it changes are both visible at a glance; the countdown ticks every second instead of waiting for the next poll.
 
 Collapsed, it shows three lines: balance, today, this month. Hovering or clicking expands: balance, the **current window**, today's breakdown, the per-model grouping, **month to date**, the **current session** (today and month), the last update time, and a refresh button.
 
@@ -67,6 +67,7 @@ Configuration lives on this plugin's row in [cordis.patch.yml](cordis.patch.yml)
 | `currency` | `CNY` | Currency used to display spend |
 | `refreshSeconds` | `30` | Widget polling interval |
 | `balanceRefreshSeconds` | `180` | Balance cache lifetime (the balance comes from an external platform, so it is not polled aggressively) |
+| `balanceTimeoutMs` | `10000` | Deadline for one balance query; a platform that never answers is abandoned instead of stalling every poll |
 | `peakMultiplier` | `2` | Price multiplier applied during peak hours |
 | `keepDays` | `45` | How many days of aggregated logs to retain (covering one calendar month keeps the month total complete) |
 | `sessionsDir` | automatic | Session directory; defaults to `$DSH_HOME/sessions`, falling back to `~/.dsh/sessions` |
