@@ -1,12 +1,15 @@
 /**
- * Client half of the usage widget: a one-line footer row in the sidebar.
+ * Client half of the usage widget: a compact three-line footer in the sidebar.
  *
- * The footer row is deliberately a single line — balance on the left, today's
- * spend on the right — because the sidebar footer is a navigation area, not a
- * dashboard. Hovering opens a small card with the three numbers that matter;
- * the exhaustive breakdown (input/output split, cache rate, month, per-model,
- * per-session) only appears once the card is clicked, and nothing is hidden in
- * a tooltip.
+ * Information is layered so the footer stays readable without hiding what
+ * people actually watch:
+ *
+ *   collapsed  余额 · 赠送 / 时段 · 今日消费 / 本月消费
+ *   hover      今日 tokens 与输入、输出、缓存命中、命中率，以及时段倒计时
+ *   click      请求数、按模型、当前会话、更新时间与刷新
+ *
+ * The styling is token-driven so the footer matches the host in both themes,
+ * and numbers are tabular so they do not jitter as they change.
  *
  * It renders into `sidebar.footer.action`, the list slot the sidebar shell
  * declares just above Settings, and reads everything from the plugin's own
@@ -99,16 +102,16 @@ window.__ModuleLoader__.load({
 
     /*
      * Theme tokens only. Every value falls back so the widget stays legible if
-     * a token is ever renamed, and the card shadow is stated per theme through
-     * the elevation token the host already publishes.
+     * a token is ever renamed, and the card shadow comes from the elevation
+     * token the host already publishes.
      */
     const css = `
 .dsh-uw { position: relative; display: block; min-width: 0; }
 
 /* ---------------------------------------------------------------- footer row */
 .dsh-uw_row {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 7px 8px; margin: 0; border: 0; border-radius: var(--dsw-radius-sm, 8px);
+  display: flex; align-items: flex-start; gap: 8px; width: 100%;
+  padding: 6px 8px; margin: 0; border: 0; border-radius: var(--dsw-radius-sm, 8px);
   background: transparent; color: var(--dsw-alias-label-primary, inherit);
   font-family: var(--dsw-font-xs-13-font-family, inherit);
   font-size: var(--dsw-font-xs-13-font-size, 13px);
@@ -117,24 +120,22 @@ window.__ModuleLoader__.load({
 }
 .dsh-uw_row:hover, .dsh-uw_row--open { background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.12)); }
 .dsh-uw_row:focus-visible { outline: 2px solid var(--dsw-alias-link, #4d6bfe); outline-offset: -2px; }
-.dsh-uw_icon { flex: 0 0 auto; display: flex; align-items: center; color: var(--dsw-alias-label-tertiary, currentColor); }
-.dsh-uw_balance {
-  font-weight: 600; letter-spacing: -0.01em;
-  font-variant-numeric: tabular-nums; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis;
+.dsh-uw_icon { flex: 0 0 auto; display: flex; align-items: center; height: 18px; color: var(--dsw-alias-label-tertiary, currentColor); }
+.dsh-uw_lines { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.dsh-uw_line {
+  display: flex; align-items: center; gap: 5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.dsh-uw_grow { flex: 1 1 auto; }
-.dsh-uw_today {
-  color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1));
-  font-size: var(--dsw-font-xxs-12-font-size, 12px);
-  font-variant-numeric: tabular-nums; white-space: nowrap;
-}
-.dsh-uw_today--alert { color: var(--dsw-alias-state-error-label, #ef4444); }
-.dsh-uw_dot {
-  flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
-  background: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1));
-}
+.dsh-uw_line--main { font-size: var(--dsw-font-xs-13-font-size, 13px); line-height: 18px; }
+.dsh-uw_line--dim { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); font-size: var(--dsw-font-xxs-12-font-size, 12px); line-height: 16px; }
+.dsh-uw_label { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
+.dsh-uw_value { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.dsh-uw_value--strong { font-weight: 600; }
+.dsh-uw_sep { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); opacity: 0.7; }
+.dsh-uw_dim { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); font-variant-numeric: tabular-nums; }
+.dsh-uw_dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
 .dsh-uw_dot--peak { background: var(--dsw-alias-state-warn-label, #d9a441); }
+.dsh-uw_pill { display: inline-flex; align-items: center; gap: 5px; color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
 
 /* ---------------------------------------------------------------- the card */
 .dsh-uw_card {
@@ -148,7 +149,7 @@ window.__ModuleLoader__.load({
   line-height: var(--dsw-font-xxs-12-line-height, 18px);
   max-height: min(72vh, 460px); overflow-y: auto; overscroll-behavior: contain;
 }
-.dsh-uw_line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.dsh-uw_kv { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .dsh-uw_k { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); white-space: nowrap; }
 .dsh-uw_v { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dsh-uw_v--strong { font-weight: 600; }
@@ -158,7 +159,6 @@ window.__ModuleLoader__.load({
 }
 .dsh-uw_sub { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); font-size: 11px; font-variant-numeric: tabular-nums; }
 .dsh-uw_hr { height: 1px; background: var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.16)); margin: 9px 0; }
-.dsh-uw_pill { display: inline-flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary, inherit); }
 .dsh-uw_time { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); font-size: 11px; font-variant-numeric: tabular-nums; }
 .dsh-uw_hint { display: flex; justify-content: flex-end; margin-top: 7px; }
 .dsh-uw_hintText { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); font-size: 10px; }
@@ -353,10 +353,10 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function Line(props) {
+    function KeyValue(props) {
       return h(
         'div',
-        { className: 'dsh-uw_line' },
+        { className: 'dsh-uw_kv' },
         h('span', { className: 'dsh-uw_k' }, props.label),
         h('span', { className: `dsh-uw_v${props.strong ? ' dsh-uw_v--strong' : ''}` }, props.value),
       )
@@ -371,84 +371,76 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** `17.59M · ¥0.79` — the shape both the today and month figures use. */
+    /** `17.59M · ¥0.79` — the shape both the today and model figures use. */
     function tokensAndCost(view, currency) {
       if (view === null || view === undefined) return '—'
       return `${formatTokens(view.totalTokens)} · ${formatMoney(view.cost, currency)}`
     }
 
+    /** The pricing-window chip, used on the collapsed line and in the card. */
+    function WindowPill(props) {
+      const view = props.view
+      if (view === null || view === undefined) return null
+      return h(
+        'span',
+        { className: 'dsh-uw_pill' },
+        h('span', { className: `dsh-uw_dot${view.peak ? ' dsh-uw_dot--peak' : ''}` }),
+        view.label,
+      )
+    }
+
     /**
      * The hover card.
      *
-     * `detail` is false on hover and true once pinned, which is the whole point
-     * of the redesign: hovering must not dump thirty numbers on someone who
-     * only wanted the balance.
+     * Hovering answers "where did today's tokens go?"; the per-model and
+     * per-session figures stay behind a click because they are what made the
+     * old panel a wall of numbers.
      */
     function UsageCard(props) {
       const { data, t, currency, detail, error, busy, sessionId, onRefresh, window: windowInfo } = props
-      const balance = data?.balance ?? null
       const today = data?.today ?? null
       const month = data?.month ?? null
       const session = data?.session ?? null
-      const groups = walletGroups(balance, currency)
       const timestamp = Number.isFinite(data?.updatedAt) ? formatClock(data.updatedAt) : '—'
       const version = typeof data?.version === 'string' && data.version.length > 0 ? `v${data.version}` : ''
-      const showMonth = data?.pricing?.showMonth !== false
 
-      const rows = []
-
-      // Balance: one emphasised figure, bonus dimmed underneath.
-      if (groups.main.length === 0) {
-        rows.push(
-          h(
-            'div',
-            { className: 'dsh-uw_line', key: 'bal' },
-            h('span', { className: 'dsh-uw_k' }, t('balance')),
-            h('span', { className: 'dsh-uw_v dsh-uw_big' }, balanceStatusText(balance, t)),
-          ),
-        )
-      } else {
-        rows.push(
-          h(
-            'div',
-            { className: 'dsh-uw_line', key: 'bal' },
-            h('span', { className: 'dsh-uw_k' }, t('balance')),
-            h('span', { className: 'dsh-uw_big' }, groups.main.join(' · ')),
-          ),
-        )
-      }
-      if (groups.bonus.length > 0) {
-        rows.push(
-          h(
-            'div',
-            { className: 'dsh-uw_line', key: 'bonus', style: { marginTop: '2px' } },
-            h('span', { className: 'dsh-uw_k' }, t('bonus')),
-            h('span', { className: 'dsh-uw_sub' }, groups.bonus.join(' · ')),
-          ),
-        )
-      }
-
-      rows.push(h('div', { className: 'dsh-uw_hr', key: 'h1' }))
-      rows.push(
+      const rows = [
         h(
           'div',
-          { className: 'dsh-uw_line', key: 'today' },
+          { className: 'dsh-uw_kv', key: 'today' },
           h('span', { className: 'dsh-uw_k' }, t('today')),
-          h('span', { className: 'dsh-uw_v' }, tokensAndCost(today, currency)),
+          h('span', { className: 'dsh-uw_v dsh-uw_v--strong' }, tokensAndCost(today, currency)),
         ),
-      )
+        h('div', { className: 'dsh-uw_hr', key: 'h1' }),
+      ]
+
+      if (today !== null && today !== undefined) {
+        const promptTokens = Number(today.inputTokens ?? 0) + Number(today.cacheReadTokens ?? 0)
+        rows.push(
+          h('div', { className: 'dsh-uw_grid', key: 'grid' }, [
+            h(Cell, { key: 'in', label: t('input'), value: formatTokens(today.inputTokens) }),
+            h(Cell, { key: 'out', label: t('output'), value: formatTokens(today.outputTokens) }),
+            h(Cell, { key: 'cache', label: t('inputCached'), value: formatTokens(today.cacheReadTokens) }),
+            h(Cell, {
+              key: 'hit',
+              label: t('cacheHit'),
+              value: formatPercent(promptTokens > 0 ? Number(today.cacheReadTokens ?? 0) / promptTokens : NaN),
+            }),
+          ]),
+        )
+        if (today.costComplete === false && Array.isArray(today.unpricedModels) && today.unpricedModels.length > 0) {
+          rows.push(
+            h('div', { className: 'dsh-uw_note', key: 'unpriced' }, `${t('unpriced')}: ${today.unpricedModels.join(', ')}`),
+          )
+        }
+      }
 
       if (windowInfo !== null && windowInfo !== undefined) {
         rows.push(
           h(
             'div',
-            { className: 'dsh-uw_line', key: 'window', style: { marginTop: '3px' } },
-            h(
-              'span',
-              { className: 'dsh-uw_pill' },
-              h('span', { className: `dsh-uw_dot${windowInfo.peak ? ' dsh-uw_dot--peak' : ''}` }),
-              windowInfo.label,
-            ),
+            { className: 'dsh-uw_kv', key: 'window', style: { marginTop: '2px' } },
+            h(WindowPill, { view: windowInfo }),
             h('span', { className: 'dsh-uw_time' }, windowInfo.nextText),
           ),
         )
@@ -464,30 +456,10 @@ window.__ModuleLoader__.load({
         )
       } else {
         rows.push(h('div', { className: 'dsh-uw_hr', key: 'h2' }))
-        if (today !== null && today !== undefined) {
-          const promptTokens = Number(today.inputTokens ?? 0) + Number(today.cacheReadTokens ?? 0)
-          rows.push(
-            h('div', { className: 'dsh-uw_grid', key: 'grid' }, [
-              h(Cell, { key: 'in', label: t('input'), value: formatTokens(today.inputTokens) }),
-              h(Cell, { key: 'out', label: t('output'), value: formatTokens(today.outputTokens) }),
-              h(Cell, { key: 'cache', label: t('inputCached'), value: formatTokens(today.cacheReadTokens) }),
-              h(Cell, {
-                key: 'hit',
-                label: t('cacheHit'),
-                value: formatPercent(promptTokens > 0 ? Number(today.cacheReadTokens ?? 0) / promptTokens : NaN),
-              }),
-            ]),
-          )
-          if (today.costComplete === false && Array.isArray(today.unpricedModels) && today.unpricedModels.length > 0) {
-            rows.push(
-              h('div', { className: 'dsh-uw_note', key: 'unpriced' }, `${t('unpriced')}: ${today.unpricedModels.join(', ')}`),
-            )
-          }
+        rows.push(h(KeyValue, { key: 'req', label: t('requests'), value: formatInt(today?.requests) }))
+        if (data?.pricing?.showMonth !== false) {
+          rows.push(h(KeyValue, { key: 'month', label: t('thisMonth'), value: tokensAndCost(month, currency) }))
         }
-        if (showMonth) {
-          rows.push(h(Line, { key: 'month', label: t('thisMonth'), value: tokensAndCost(month, currency) }))
-        }
-        rows.push(h(Line, { key: 'req', label: t('requests'), value: formatInt(today?.requests) }))
         if (month !== null && month !== undefined && month.complete === false) {
           rows.push(h('div', { className: 'dsh-uw_note', key: 'partial' }, t('monthPartial')))
         }
@@ -509,22 +481,20 @@ window.__ModuleLoader__.load({
           )
         }
 
-        // The session block only earns its rows when the host resolved one.
+        // The session block only earns its row when the host resolved one.
         if (sessionId && session !== null && session !== undefined) {
-          rows.push(
-            h(Line, {
-              key: 'sess',
-              label: t('currentSession'),
-              value: tokensAndCost(session, currency),
-            }),
-          )
+          rows.push(h(KeyValue, { key: 'sess', label: t('currentSession'), value: tokensAndCost(session, currency) }))
         }
 
         rows.push(
           h(
             'div',
             { className: 'dsh-uw_foot', key: 'foot' },
-            h('span', { className: 'dsh-uw_time' }, `${t('updated')} ${timestamp}${version.length > 0 ? ` · ${version}` : ''}`),
+            h(
+              'span',
+              { className: 'dsh-uw_time' },
+              `${t('updated')} ${timestamp}${version.length > 0 ? ` · ${version}` : ''}`,
+            ),
             h(
               'button',
               { type: 'button', className: 'dsh-uw_refresh', onClick: onRefresh, disabled: busy === true },
@@ -542,9 +512,10 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Footer widget: one line collapsed, a small card on hover, the full
-     * breakdown only after a click. The collapsed rail shows the icon alone and
-     * carries a single short line in its tooltip.
+     * Footer widget.
+     *
+     * Three lines collapsed, a two-part card on hover and click. The collapsed
+     * rail shows the icon alone and carries a single short line in its tooltip.
      */
     function makeWidget(ctx, boundT) {
       return function UsageWidget(props) {
@@ -680,6 +651,8 @@ window.__ModuleLoader__.load({
         const currency = data?.pricing?.currency ?? 'CNY'
         const balance = data?.balance ?? null
         const today = data?.today ?? null
+        const month = data?.month ?? null
+        const showMonth = data?.pricing?.showMonth !== false
         const elapsed = Number.isFinite(data?.receivedAt) ? Math.max(0, Date.now() - data.receivedAt) : 0
         const windowInfo = windowView(data, translate, elapsed)
 
@@ -690,6 +663,7 @@ window.__ModuleLoader__.load({
             : data === null
               ? translate('loading')
               : balanceStatusText(balance, translate)
+        const bonusText = groups.bonus.length > 0 ? groups.bonus[0] : ''
 
         // Error wins over a stale figure: a failed poll must not keep showing
         // an old number as if it were current.
@@ -698,9 +672,18 @@ window.__ModuleLoader__.load({
             ? translate('error')
             : today === null
               ? translate('loading')
-              : `${translate('today')} ${formatMoney(today.cost, currency)}`
+              : formatMoney(today.cost, currency)
+        const monthText =
+          error !== null ? translate('none') : month === null ? translate('loading') : formatMoney(month.cost, currency)
 
-        const tooltip = `${translate('balance')} ${balanceText} · ${todayText} · ${translate('collapsedHint')}`
+        const tooltip = [
+          `${translate('balance')} ${balanceText}`,
+          windowInfo !== null ? windowInfo.label : '',
+          `${translate('today')} ${todayText}`,
+          `${translate('thisMonth')} ${monthText}`,
+        ]
+          .filter((part) => part.length > 0)
+          .join(' · ')
 
         if (!wide) {
           return h(
@@ -709,6 +692,29 @@ window.__ModuleLoader__.load({
             h('span', { className: 'dsh-uw_icon' }, h(UsageIcon, { size: 16 })),
           )
         }
+
+        const lines = [
+          h('span', { className: 'dsh-uw_line dsh-uw_line--main', key: 'bal' }, [
+            h('span', { className: 'dsh-uw_label', key: 'l' }, translate('balance')),
+            h('span', { className: 'dsh-uw_value dsh-uw_value--strong', key: 'v' }, balanceText),
+            bonusText.length > 0 ? h('span', { className: 'dsh-uw_sep', key: 's' }, '·') : null,
+            bonusText.length > 0
+              ? h('span', { className: 'dsh-uw_dim', key: 'b' }, `${translate('bonus')} ${bonusText}`)
+              : null,
+          ]),
+          h('span', { className: 'dsh-uw_line dsh-uw_line--dim', key: 'today' }, [
+            windowInfo !== null ? h(WindowPill, { key: 'w', view: windowInfo }) : null,
+            windowInfo !== null ? h('span', { className: 'dsh-uw_sep', key: 's1' }, '·') : null,
+            h('span', { className: 'dsh-uw_label', key: 'l' }, translate('today')),
+            h('span', { className: 'dsh-uw_dim', key: 'v' }, todayText),
+          ]),
+          showMonth
+            ? h('span', { className: 'dsh-uw_line dsh-uw_line--dim', key: 'month' }, [
+                h('span', { className: 'dsh-uw_label', key: 'l' }, translate('thisMonth')),
+                h('span', { className: 'dsh-uw_dim', key: 'v' }, monthText),
+              ])
+            : null,
+        ]
 
         const row = h(
           'button',
@@ -730,14 +736,7 @@ window.__ModuleLoader__.load({
             },
           },
           h('span', { className: 'dsh-uw_icon', key: 'icon' }, h(UsageIcon, { size: 16 })),
-          h('span', { className: 'dsh-uw_balance', key: 'bal' }, balanceText),
-          h('span', { className: 'dsh-uw_grow', key: 'grow' }),
-          windowInfo !== null && windowInfo.peak ? h('span', { className: 'dsh-uw_dot dsh-uw_dot--peak', key: 'dot' }) : null,
-          h(
-            'span',
-            { className: `dsh-uw_today${error !== null ? ' dsh-uw_today--alert' : ''}`, key: 'today' },
-            todayText,
-          ),
+          h('span', { className: 'dsh-uw_lines', key: 'lines' }, lines),
         )
 
         return h(

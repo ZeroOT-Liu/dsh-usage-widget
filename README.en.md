@@ -6,13 +6,13 @@ English | [中文](README.md)
 
 Shows the following at the **bottom left of the sidebar** (just above Settings) in the DeepSeek Harness desktop app:
 
-- **Account balance** — read through the official account service `ctx.deepseekAccount.getBalance`, the same source as Settings → Account. The collapsed row shows the topped-up balance; bonus wallets live in the hover card.
+- **Account balance** — read through the official account service `ctx.deepseekAccount.getBalance`, the same source as Settings → Account. The topped-up balance leads in the primary colour and bonus wallets follow, dimmed.
 - **Today's token usage** — summed across all sessions, with input (cache hit / cache miss), the cache hit rate and output broken out, and reasoning tokens listed separately.
-- **Today's spend** — derived from per-model prices and the **peak / off-peak** windows. The collapsed row shows today's spend; hovering adds today's tokens, and clicking adds the per-model and current-session detail.
-- **Month to date** — this month's tokens, spend, request count, active days and session count.
-- **Current pricing window** — during peak hours a small amber dot appears next to today's spend in the collapsed row; the hover card states it plainly (`Off-peak · peak in 3h 12m`), so the rate in force and the time until it changes are both visible at a glance. The countdown ticks every second and re-reads the summary the moment the window flips, instead of waiting for the next poll.
+- **Today's spend** — derived from per-model prices and the **peak / off-peak** windows; the second collapsed line reads `window · today's spend`.
+- **Month to date** — this month's tokens, spend, request count, active days and session count. The spend shows on the third collapsed line; the rest is in the breakdown.
+- **Current pricing window** — the second collapsed line opens with `● Off-peak`, and the dot turns amber during peak hours; the hover card also states `peak in 3h 12m`. The countdown ticks every second and re-reads the summary the moment the window flips, instead of waiting for the next poll.
 
-**Collapsed, it is a single line**: balance on the left, today's spend on the right. Hovering opens a compact card (balance with bonus, today's tokens and spend, current window); **clicking** expands the breakdown (input/output, cache hits and hit rate, month, requests, per-model, current session, updated time and refresh). Collapsed to the 56px rail it shrinks to an icon whose tooltip is a single line: `balance ¥5.83 · today ¥0.79`.
+**Collapsed, it is three lines**: `balance ¥5.83 · bonus ¥9.79` / `● Off-peak · today ¥0.79` / `this month ¥0.79`. **Hovering** adds today's breakdown (input, output, cache hits, hit rate) and the window countdown; **clicking** reveals the rest (request count, month tokens, per-model, current session, updated time and refresh). Collapsed to the 56px rail it shrinks to an icon whose tooltip is a single line.
 
 ## Where the data comes from
 
@@ -69,8 +69,8 @@ Configuration lives on this plugin's row in [cordis.patch.yml](cordis.patch.yml)
 | `peakMultiplier` | `2` | Price multiplier applied during peak hours |
 | `keepDays` | `45` | How many days of aggregated logs to retain (covering one calendar month keeps the month total complete) |
 | `sessionsDir` | automatic | Session directory; defaults to `$DSH_HOME/sessions`, falling back to `~/.dsh/sessions` |
-| `showMonth` | `true` | Whether the "this month" row appears in the expanded breakdown |
-| `showWindow` | `true` | Whether the peak dot and the window row in the hover card are shown |
+| `showMonth` | `true` | Whether the "this month" row is shown (the third collapsed line and the month tokens in the breakdown) |
+| `showWindow` | `true` | Whether the window line and its dot are shown |
 | `models` | DeepSeek published prices | Model → `{ cacheHit, cacheMiss, output }` |
 | `aliases` | see the file | Maps legacy, dated or `-exp` model ids onto a priced key |
 | `allowHosts` | `[]` | Extra hostnames allowed to reach the summary route, besides loopback |

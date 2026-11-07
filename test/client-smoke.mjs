@@ -397,6 +397,48 @@ function find(node, predicate) {
   return null
 }
 
+/**
+ * Like {@link find}, but also descends through function components the way the
+ * host's renderer would. Plain `find` cannot see markup that a component
+ * produces (such as the dot inside the window pill), so anything asserted on
+ * *rendered* output has to go through here.
+ */
+function findAllDeep(node, predicate, out = []) {
+  if (node === null || node === undefined || typeof node !== 'object') return out
+  if (Array.isArray(node)) {
+    for (const child of node) findAllDeep(child, predicate, out)
+    return out
+  }
+  if (!node.__el) return out
+  if (predicate(node)) out.push(node)
+  const { type, props } = node
+  if (typeof type === 'function') {
+    let scope = CHILD_SCOPES.get(type)
+    if (scope === undefined) {
+      scope = { states: [], refs: [], deps: [], pending: [], cursor: 0, dirty: false }
+      CHILD_SCOPES.set(type, scope)
+    }
+    const caller = { ...HOOKS }
+    Object.assign(HOOKS, scope)
+    try {
+      findAllDeep(type(props), predicate, out)
+    } finally {
+      for (const key of Object.keys(scope)) scope[key] = HOOKS[key]
+      Object.assign(HOOKS, caller)
+    }
+    return out
+  }
+  return findAllDeep(props?.children, predicate, out)
+}
+
+/** Nodes that carry the given class token, renderer-deep. */
+function deepByClass(node, className) {
+  return findAllDeep(
+    node,
+    (element) => typeof element.props?.className === 'string' && element.props.className.split(' ').includes(className),
+  )
+}
+
 const Widget = registrations[0].value.component
 
 /** Render to a stable tree, letting effects and their async state settle. */
@@ -444,11 +486,12 @@ const tInterp = (key) => {
 const wideTree = await render({ wide: true, t: (key) => key })
 const wideText = textOf(wideTree)
 
-await check('the collapsed row is one line: balance and today spend only', () => {
-  assert.match(wideText, /¥5\.83/, `balance rendered: ${wideText}`)
+await check('the collapsed footer keeps balance, window, today and month', () => {
+  assert.match(wideText, /balance\s+¥5\.83/, `balance rendered: ${wideText}`)
+  assert.match(wideText, /bonus\s+¥9\.79/, `bonus wallet rendered: ${wideText}`)
+  assert.match(wideText, /peakLabel/, 'the pricing window is named on the collapsed line')
   assert.match(wideText, /today\s+¥1\.3/, `today spend rendered: ${wideText}`)
-  assert.ok(!wideText.includes('¥9.79'), 'the bonus wallet stays in the card')
-  assert.ok(!wideText.includes('204.52M'), 'the month total stays in the card')
+  assert.match(wideText, /thisMonth\s+¥11\.14/, `month spend rendered: ${wideText}`)
   assert.ok(String(sandbox.__lastUrl).includes('sessionId=session-test'), 'the current session id is sent to the host')
 })
 
@@ -476,18 +519,19 @@ await check('the summary row is a real button with an expanded state', () => {
   assert.equal(typeof target.props.onClick, 'function')
 })
 
-await check('hovering opens a compact card, not the whole breakdown', async () => {
+await check('hovering adds the today breakdown but not the per-model detail', async () => {
   const root = find(wideTree, (node) => node.props?.className === 'dsh-uw')
   assert.ok(root, 'root found')
   root.props.onMouseEnter()
   const hovered = await render({ wide: true, t: (key) => key })
   const text = textOf(hovered)
-  assert.match(text, /balance\s+¥5\.83/)
-  assert.match(text, /bonus\s+¥9\.79/)
   assert.match(text, /today\s+20\.34M · ¥1\.3/)
-  assert.ok(text.includes('hintDetail'), 'the card invites a click for the breakdown')
-  for (const hidden of ['input', 'cacheHit', 'byModel', 'thisMonth', 'requests', 'refresh', 'v9.9.9']) {
-    assert.ok(!text.includes(hidden), `hover must not show "${hidden}": ${text.slice(0, 240)}`)
+  assert.ok(text.includes('input'), 'input figure present')
+  assert.ok(text.includes('output'), 'output figure present')
+  assert.match(text, /cacheHit\s+98%/, `cache hit rate rendered: ${text.slice(0, 240)}`)
+  assert.ok(text.includes('hintDetail'), 'the card invites a click for the rest')
+  for (const hidden of ['byModel', 'currentSession', 'refresh', 'v9.9.9', 'requests']) {
+    assert.ok(!text.includes(hidden), `hover must not show "${hidden}": ${text.slice(0, 260)}`)
   }
 })
 
@@ -515,8 +559,9 @@ await check('Escape closes the card again', async () => {
   holder.props.onKeyDown({ key: 'Escape' })
   const collapsed = await render({ wide: true, t: (key) => key })
   const text = textOf(collapsed)
-  assert.ok(!text.includes('bonus'), 'the card is closed again')
-  assert.match(text, /today\s+¥1\.3/, 'the collapsed row remains')
+  assert.ok(!text.includes('hintDetail'), 'the card is closed again')
+  assert.ok(!text.includes('cacheHit'), 'no detail figures remain')
+  assert.match(text, /today\s+¥1\.3/, 'the collapsed lines remain')
 })
 
 await check('the stylesheet is injected and its cleanup removes it', () => {
@@ -588,7 +633,7 @@ await check('the pricing window row appears in the card and can be turned off', 
   assert.match(text, /高峰时段/, `the phase is named in the card: ${text.slice(0, 260)}`)
   assert.match(text, /1h 30m 后空闲/, `the countdown comes from host instants: ${text.slice(0, 260)}`)
   assert.ok(
-    find(hovered, (node) => typeof node.props?.className === 'string' && node.props.className.includes('dsh-uw_dot--peak')),
+    deepByClass(hovered, 'dsh-uw_dot--peak').length > 0,
     'the collapsed row marks the peak window with a dot',
   )
 
@@ -600,8 +645,9 @@ await check('the pricing window row appears in the card and can be turned off', 
   const off = await render({ wide: true, t: tInterp })
   const offText = textOf(off)
   assert.ok(!offText.includes('高峰时段'), 'no window row when showWindow is false')
-  assert.ok(
-    !find(off, (node) => typeof node.props?.className === 'string' && node.props.className.includes('dsh-uw_dot--peak')),
+  assert.equal(
+    deepByClass(off, 'dsh-uw_dot--peak').length,
+    0,
     'no peak dot when showWindow is false',
   )
   assert.match(offText, /today\s+20\.34M/, 'the today figure stays')
