@@ -1,5 +1,12 @@
 /**
- * Client half of the usage widget: a footer row at the bottom of the sidebar.
+ * Client half of the usage widget: a one-line footer row in the sidebar.
+ *
+ * The footer row is deliberately a single line — balance on the left, today's
+ * spend on the right — because the sidebar footer is a navigation area, not a
+ * dashboard. Hovering opens a small card with the three numbers that matter;
+ * the exhaustive breakdown (input/output split, cache rate, month, per-model,
+ * per-session) only appears once the card is clicked, and nothing is hidden in
+ * a tooltip.
  *
  * It renders into `sidebar.footer.action`, the list slot the sidebar shell
  * declares just above Settings, and reads everything from the plugin's own
@@ -21,39 +28,35 @@ window.__ModuleLoader__.load({
       balance: '余额',
       bonus: '赠送',
       today: '今日',
-      todayUsage: '今日用量',
       thisMonth: '本月',
-      monthUsage: '本月累计',
-      activeDays: '活跃天数',
-      monthPartial: '本月早期数据超出保留窗口，可能不完整',
       currentSession: '当前会话',
       sessionUnknown: '未选中会话',
-      tokens: 'tokens',
-      totalTokens: '总 tokens',
       input: '输入',
-      inputCached: '输入（缓存命中）',
+      inputCached: '缓存命中',
       output: '输出',
-      reasoning: '其中推理',
-      cacheHit: '缓存命中率',
+      reasoning: '推理',
+      cacheHit: '命中率',
       requests: '请求数',
+      activeDays: '活跃天数',
       sessions: '会话数',
       cost: '花费',
       byModel: '按模型',
-      noData: '今日暂无用量',
+      window: '当前时段',
+      peakLabel: '高峰时段',
+      offPeakLabel: '空闲时段',
+      untilPeak: '{time} 后高峰',
+      untilOffPeak: '{time} 后空闲',
       updated: '更新于',
       refresh: '刷新',
-      loading: '加载中…',
+      loading: '…',
       error: '读取失败',
       balanceUnavailable: '账号服务不可用',
       balanceSignedOut: '未登录',
       balanceFailed: '余额查询失败',
-      unpriced: '未配置单价，未计入花费',
-      window: '当前时段',
-      peakLabel: '高峰时段',
-      offPeakLabel: '空闲时段',
-      switchIn: '距切换',
-      windowHint: '高峰单价 ×{multiplier}（北京时间 周一至周五 9:00–12:00、14:00–18:00），其余时段按半价',
-      collapsedHint: '展开侧边栏查看明细',
+      unpriced: '未配置单价',
+      monthPartial: '本月早期数据可能不完整',
+      hintDetail: '点击查看明细',
+      collapsedHint: '展开侧边栏查看',
       none: '—',
     }
 
@@ -62,105 +65,135 @@ window.__ModuleLoader__.load({
       balance: 'Balance',
       bonus: 'Bonus',
       today: 'Today',
-      todayUsage: 'Today usage',
       thisMonth: 'This month',
-      monthUsage: 'Month to date',
-      activeDays: 'Active days',
-      monthPartial: 'Early-month data is past the retention window; the total may be short',
-      currentSession: 'Current session',
+      currentSession: 'This session',
       sessionUnknown: 'No session selected',
-      tokens: 'tokens',
-      totalTokens: 'Total tokens',
       input: 'Input',
-      inputCached: 'Input (cache hit)',
+      inputCached: 'Cache hit',
       output: 'Output',
-      reasoning: 'of which reasoning',
-      cacheHit: 'Cache hit rate',
+      reasoning: 'Reasoning',
+      cacheHit: 'Hit rate',
       requests: 'Requests',
+      activeDays: 'Active days',
       sessions: 'Sessions',
       cost: 'Cost',
       byModel: 'By model',
-      noData: 'No usage today',
+      window: 'Current window',
+      peakLabel: 'Peak',
+      offPeakLabel: 'Off-peak',
+      untilPeak: 'peak in {time}',
+      untilOffPeak: 'off-peak in {time}',
       updated: 'Updated',
       refresh: 'Refresh',
-      loading: 'Loading…',
+      loading: '…',
       error: 'Read failed',
       balanceUnavailable: 'Account service unavailable',
       balanceSignedOut: 'Signed out',
       balanceFailed: 'Balance query failed',
-      unpriced: 'No price configured; excluded from cost',
-      window: 'Current window',
-      peakLabel: 'Peak',
-      offPeakLabel: 'Off-peak',
-      switchIn: 'switches in',
-      windowHint: 'Peak prices are ×{multiplier} (Beijing time, Mon–Fri 09:00–12:00 and 14:00–18:00); other hours are half price',
-      collapsedHint: 'Expand the sidebar for details',
+      unpriced: 'Unpriced',
+      monthPartial: 'Early-month data may be incomplete',
+      hintDetail: 'Click for details',
+      collapsedHint: 'Expand the sidebar',
       none: '—',
     }
 
+    /*
+     * Theme tokens only. Every value falls back so the widget stays legible if
+     * a token is ever renamed, and the card shadow is stated per theme through
+     * the elevation token the host already publishes.
+     */
     const css = `
 .dsh-uw { position: relative; display: block; min-width: 0; }
+
+/* ---------------------------------------------------------------- footer row */
 .dsh-uw_row {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 6px 8px; margin: 0; border: 0; border-radius: var(--dsw-radius-sm, 6px);
+  padding: 7px 8px; margin: 0; border: 0; border-radius: var(--dsw-radius-sm, 8px);
   background: transparent; color: var(--dsw-alias-label-primary, inherit);
   font-family: var(--dsw-font-xs-13-font-family, inherit);
-  font-size: var(--dsw-font-xs-13-font-size, 12px);
-  line-height: var(--dsw-font-xs-13-line-height, 1.4);
+  font-size: var(--dsw-font-xs-13-font-size, 13px);
+  line-height: var(--dsw-font-xs-13-line-height, 20px);
   text-align: left; cursor: pointer;
 }
-.dsh-uw_row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.14)); }
-.dsh-uw_row:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #4d6bfe); outline-offset: -2px; }
-.dsh-uw_icon { flex: 0 0 auto; display: flex; align-items: center; color: var(--dsw-alias-label-secondary, currentColor); }
-.dsh-uw_lines { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.dsh-uw_line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dsh-uw_line--dim { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
-.dsh-uw_sep { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
-.dsh-uw_line--alert { color: var(--dsw-alias-state-warn-label, #d9a441); }
-/* The live peak/off-peak badge: an inline chip that keeps the window visible
-   while the footer is collapsed. Peak is the exception that costs more, so it
-   takes the warning colour and off-peak stays quiet. */
-.dsh-uw_badge {
-  display: inline-block; margin-right: 4px; padding: 0 4px; border-radius: var(--dsw-radius-xs, 4px);
-  font-size: calc(var(--dsw-font-xs-13-font-size, 12px) - 1px);
-  background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.14));
+.dsh-uw_row:hover, .dsh-uw_row--open { background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.12)); }
+.dsh-uw_row:focus-visible { outline: 2px solid var(--dsw-alias-link, #4d6bfe); outline-offset: -2px; }
+.dsh-uw_icon { flex: 0 0 auto; display: flex; align-items: center; color: var(--dsw-alias-label-tertiary, currentColor); }
+.dsh-uw_balance {
+  font-weight: 600; letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
 }
-.dsh-uw_badge--peak { color: var(--dsw-alias-state-warn-label, #d9a441); }
-.dsh-uw_badge--offpeak { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
-.dsh-uw_badgeValue { font-variant-numeric: tabular-nums; }
-.dsh-uw_hint { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
-.dsh-uw_narrow { display: flex; align-items: center; justify-content: center; padding: 6px 0; }
-.dsh-uw_panel {
-  margin: 0 0 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.28));
-  border-radius: var(--dsw-radius-md, 8px);
-  background: var(--dsw-alias-bg-layer-2, rgba(40, 40, 40, 1));
-  box-shadow: var(--dsw-elevation-panel, 0 8px 24px rgba(0, 0, 0, 0.3));
+.dsh-uw_grow { flex: 1 1 auto; }
+.dsh-uw_today {
+  color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1));
+  font-size: var(--dsw-font-xxs-12-font-size, 12px);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.dsh-uw_today--alert { color: var(--dsw-alias-state-error-label, #ef4444); }
+.dsh-uw_dot {
+  flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1));
+}
+.dsh-uw_dot--peak { background: var(--dsw-alias-state-warn-label, #d9a441); }
+
+/* ---------------------------------------------------------------- the card */
+.dsh-uw_card {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 30;
+  padding: 12px 12px 10px; border-radius: var(--dsw-radius-md, 12px);
+  background: var(--dsw-alias-bg-layer-2, rgba(44, 44, 46, 1));
+  box-shadow: var(--dsw-elevation-panel, 0 8px 24px rgba(0, 0, 0, 0.18));
   color: var(--dsw-alias-label-primary, inherit);
   font-family: var(--dsw-font-xs-13-font-family, inherit);
-  font-size: var(--dsw-font-xs-13-font-size, 12px);
-  line-height: var(--dsw-font-xs-13-line-height, 1.4);
+  font-size: var(--dsw-font-xxs-12-font-size, 12px);
+  line-height: var(--dsw-font-xxs-12-line-height, 18px);
+  max-height: min(72vh, 460px); overflow-y: auto; overscroll-behavior: contain;
 }
-.dsh-uw_head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.dsh-uw_headTitle { font-weight: 600; }
-.dsh-uw_headDay { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
-.dsh-uw_group { display: flex; flex-direction: column; gap: 3px; }
-.dsh-uw_groupTitle { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
-.dsh-uw_kv { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.dsh-uw_k { color: var(--dsw-alias-label-secondary, inherit); white-space: nowrap; }
+.dsh-uw_line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.dsh-uw_k { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); white-space: nowrap; }
 .dsh-uw_v { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dsh-uw_v--strong { font-weight: 600; }
-.dsh-uw_divider { height: 1px; background: var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.2)); }
-.dsh-uw_models { display: flex; flex-direction: column; gap: 2px; }
-.dsh-uw_model { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.dsh-uw_modelName { color: var(--dsw-alias-label-secondary, inherit); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dsh-uw_foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); }
-.dsh-uw_refresh {
-  border: 0; background: transparent; cursor: pointer; padding: 2px 4px; border-radius: var(--dsw-radius-xs, 4px);
-  color: var(--dsw-alias-link, inherit); font: inherit;
+.dsh-uw_big {
+  font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-.dsh-uw_refresh:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.14)); }
-.dsh-uw_note { color: var(--dsw-alias-state-warn-label, #d9a441); }
+.dsh-uw_sub { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); font-size: 11px; font-variant-numeric: tabular-nums; }
+.dsh-uw_hr { height: 1px; background: var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.16)); margin: 9px 0; }
+.dsh-uw_pill { display: inline-flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary, inherit); }
+.dsh-uw_time { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); font-size: 11px; font-variant-numeric: tabular-nums; }
+.dsh-uw_hint { display: flex; justify-content: flex-end; margin-top: 7px; }
+.dsh-uw_hintText { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); font-size: 10px; }
+
+/* -------------------------------------------------------------- detail block */
+.dsh-uw_grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin: 2px 0 6px; }
+.dsh-uw_cell { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dsh-uw_cellK { color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1)); font-size: 11px; line-height: 15px; }
+.dsh-uw_cellV { font-variant-numeric: tabular-nums; font-weight: 500; font-size: 13px; line-height: 18px; }
+.dsh-uw_sectionTitle {
+  color: var(--dsw-alias-label-tertiary, rgba(150, 150, 150, 1));
+  font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; margin: 10px 0 5px;
+}
+.dsh-uw_models { display: flex; flex-direction: column; gap: 3px; }
+.dsh-uw_model { display: flex; justify-content: space-between; gap: 10px; }
+.dsh-uw_modelName {
+  color: var(--dsw-alias-label-secondary, inherit); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dsh-uw_note { color: var(--dsw-alias-state-warn-label, #d9a441); font-size: 11px; line-height: 16px; margin-top: 6px; }
+.dsh-uw_foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px solid var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.16));
+}
+.dsh-uw_refresh {
+  border: 0; background: transparent; cursor: pointer; padding: 1px 6px; border-radius: 6px;
+  color: var(--dsw-alias-link, inherit); font: inherit; font-size: 11px;
+}
+.dsh-uw_refresh:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.12)); }
+.dsh-uw_refresh:disabled { opacity: 0.5; cursor: default; }
+
+/* ------------------------------------------------------------ collapsed rail */
+.dsh-uw_narrow { display: flex; align-items: center; justify-content: center; padding: 7px 0; }
+.dsh-uw_narrow .dsh-uw_icon { color: var(--dsw-alias-label-tertiary, currentColor); }
 `
 
     /* ---------------------------------------------------------------- format */
@@ -254,65 +287,45 @@ window.__ModuleLoader__.load({
       if (window === null || typeof window !== 'object') return null
       if (payload?.pricing?.showWindow === false) return null
       const peak = window.phase === 'peak'
-      const multiplier = Number(payload?.pricing?.peakMultiplier)
       const remaining = Number(window.changesAt) - Number(payload?.hostNow) - Math.max(0, Number(elapsedMs) || 0)
+      const countdown = Number.isFinite(remaining) && remaining > 0 ? formatDuration(remaining) : ''
       return {
         peak,
         label: peak ? t('peakLabel') : t('offPeakLabel'),
-        // Peak is the only window that costs more, so it is the only one worth
-        // showing a multiplier for in the badge itself.
-        badgeText: peak && Number.isFinite(multiplier) ? `×${trimFixed(multiplier, 2)}` : '',
-        multiplierText: Number.isFinite(multiplier) ? `×${trimFixed(multiplier, 2)}` : '—',
-        nextLabel: window.nextPhase === 'peak' ? t('peakLabel') : t('offPeakLabel'),
-        countdown: Number.isFinite(remaining) && remaining > 0 ? formatDuration(remaining) : '',
-        hint: t('windowHint').replace('{multiplier}', Number.isFinite(multiplier) ? trimFixed(multiplier, 2) : '2'),
+        countdown,
+        nextText:
+          countdown.length === 0
+            ? ''
+            : window.nextPhase === 'peak'
+              ? t('untilPeak').replace('{time}', countdown)
+              : t('untilOffPeak').replace('{time}', countdown),
       }
     }
 
-    /** The inline chip that keeps the current window visible while collapsed. */
-    function WindowBadge(props) {
-      const view = props.view
-      if (view === null || view === undefined) return null
-      return h(
-        'span',
-        { className: `dsh-uw_badge dsh-uw_badge--${view.peak ? 'peak' : 'offpeak'}` },
-        view.label,
-        view.badgeText.length > 0 ? h('span', { className: 'dsh-uw_badgeValue' }, ` ${view.badgeText}`) : null,
-      )
+    /* -------------------------------------------------------------- wallets */
+
+    /** Split the reported wallets into the topped-up list and the bonus list. */
+    function walletGroups(balance, currency) {
+      if (balance === null || balance === undefined || balance.status !== 'ready') {
+        return { main: [], bonus: [] }
+      }
+      const toEntry = (wallet) => formatBalanceWallet(wallet, currency)
+      return {
+        main: (Array.isArray(balance.wallets) ? balance.wallets : []).map(toEntry),
+        bonus: (Array.isArray(balance.bonusWallets) ? balance.bonusWallets : []).map(toEntry),
+      }
     }
 
-    /**
-     * Every wallet as `{ label, value }` parts: the topped-up balance first,
-     * then each bonus wallet. The bonus is spendable too, so it belongs in the
-     * collapsed summary rather than only in the expanded panel.
-     */
-    function walletParts(balance, currency, t) {
-      if (balance === null || balance === undefined) return [{ label: null, value: t('none') }]
-      if (balance.status !== 'ready') {
-        const status =
-          balance.status === 'signed-out'
-            ? t('balanceSignedOut')
-            : balance.status === 'unavailable'
-              ? t('balanceUnavailable')
-              : t('balanceFailed')
-        return [{ label: null, value: status }]
-      }
-      const parts = []
-      for (const wallet of Array.isArray(balance.wallets) ? balance.wallets : []) {
-        parts.push({ label: null, value: formatBalanceWallet(wallet, currency) })
-      }
-      for (const wallet of Array.isArray(balance.bonusWallets) ? balance.bonusWallets : []) {
-        parts.push({ label: t('bonus'), value: formatBalanceWallet(wallet, currency) })
-      }
-      return parts.length > 0 ? parts : [{ label: null, value: t('none') }]
+    /** Short status line used wherever the balance figure would sit. */
+    function balanceStatusText(balance, t) {
+      if (balance === null || balance === undefined) return t('none')
+      if (balance.status === 'signed-out') return t('balanceSignedOut')
+      if (balance.status === 'unavailable') return t('balanceUnavailable')
+      if (balance.status === 'failed') return t('balanceFailed')
+      return t('none')
     }
 
-    /** Flat text form of {@link walletParts}, for tooltips. */
-    function walletText(parts) {
-      return parts.map((part) => (part.label === null ? part.value : `${part.label} ${part.value}`)).join(' · ')
-    }
-
-    /* ------------------------------------------------------------ component */
+    /* ------------------------------------------------------------ components */
 
     function UsageIcon(props) {
       const size = props?.size ?? 16
@@ -340,242 +353,198 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function KeyValue(props) {
+    function Line(props) {
       return h(
         'div',
-        { className: 'dsh-uw_kv' },
+        { className: 'dsh-uw_line' },
         h('span', { className: 'dsh-uw_k' }, props.label),
         h('span', { className: `dsh-uw_v${props.strong ? ' dsh-uw_v--strong' : ''}` }, props.value),
       )
     }
 
-    /** One day's usage block, shared by the total and the current session. */
-    function UsageBlock(props) {
-      const { view, t, currency, compact } = props
-      if (view === null || view === undefined) {
-        return h('div', { className: 'dsh-uw_kv' }, h('span', { className: 'dsh-uw_k' }, t('noData')))
-      }
-      const promptTokens = Number(view.inputTokens ?? 0) + Number(view.cacheReadTokens ?? 0)
-      const children = [
-        h(KeyValue, {
-          key: 'total',
-          strong: true,
-          label: t('totalTokens'),
-          value: formatInt(view.totalTokens),
-        }),
-        h(KeyValue, { key: 'in', label: t('input'), value: formatInt(view.inputTokens) }),
-        h(KeyValue, { key: 'cached', label: t('inputCached'), value: formatInt(view.cacheReadTokens) }),
-        promptTokens > 0
-          ? h(KeyValue, {
-              key: 'hit',
-              label: t('cacheHit'),
-              value: formatPercent(Number(view.cacheReadTokens ?? 0) / promptTokens),
-            })
-          : null,
-        h(KeyValue, { key: 'out', label: t('output'), value: formatInt(view.outputTokens) }),
-        h(KeyValue, { key: 'reason', label: t('reasoning'), value: formatInt(view.reasoningTokens) }),
-        h(KeyValue, { key: 'cost', strong: true, label: t('cost'), value: formatMoney(view.cost, currency) }),
-        h(KeyValue, { key: 'req', label: t('requests'), value: formatInt(view.requests) }),
-      ]
-      if (!compact && Number.isFinite(view.sessions)) {
-        children.push(h(KeyValue, { key: 'sess', label: t('sessions'), value: formatInt(view.sessions) }))
-      }
-      if (view.costComplete === false && Array.isArray(view.unpricedModels) && view.unpricedModels.length > 0) {
-        children.push(
-          h('div', { key: 'unpriced', className: 'dsh-uw_note' }, `${t('unpriced')}: ${view.unpricedModels.join(', ')}`),
-        )
-      }
-      return h('div', { className: 'dsh-uw_group' }, children)
+    function Cell(props) {
+      return h(
+        'div',
+        { className: 'dsh-uw_cell' },
+        h('span', { className: 'dsh-uw_cellK' }, props.label),
+        h('span', { className: 'dsh-uw_cellV' }, props.value),
+      )
+    }
+
+    /** `17.59M · ¥0.79` — the shape both the today and month figures use. */
+    function tokensAndCost(view, currency) {
+      if (view === null || view === undefined) return '—'
+      return `${formatTokens(view.totalTokens)} · ${formatMoney(view.cost, currency)}`
     }
 
     /**
-     * Month-to-date totals. Only the figures that are meaningful cumulatively
-     * are shown — the full input/output breakdown already exists for today, and
-     * repeating it would bury the two numbers the section exists for.
+     * The hover card.
+     *
+     * `detail` is false on hover and true once pinned, which is the whole point
+     * of the redesign: hovering must not dump thirty numbers on someone who
+     * only wanted the balance.
      */
-    function MonthBlock(props) {
-      const { view, t, currency } = props
-      if (view === null || view === undefined) {
-        return h(KeyValue, { label: t('totalTokens'), value: t('none') })
-      }
-      const children = [
-        h(KeyValue, { key: 'total', strong: true, label: t('totalTokens'), value: formatInt(view.totalTokens) }),
-        h(KeyValue, { key: 'cost', strong: true, label: t('cost'), value: formatMoney(view.cost, currency) }),
-        h(KeyValue, { key: 'req', label: t('requests'), value: formatInt(view.requests) }),
-        h(KeyValue, { key: 'days', label: t('activeDays'), value: formatInt(view.days) }),
-        h(KeyValue, { key: 'sess', label: t('sessions'), value: formatInt(view.sessions) }),
-      ]
-      if (view.complete === false) {
-        children.push(h('div', { key: 'partial', className: 'dsh-uw_note' }, t('monthPartial')))
-      }
-      if (view.costComplete === false && Array.isArray(view.unpricedModels) && view.unpricedModels.length > 0) {
-        children.push(
-          h('div', { key: 'unpriced', className: 'dsh-uw_note' }, `${t('unpriced')}: ${view.unpricedModels.join(', ')}`),
-        )
-      }
-      return h('div', { className: 'dsh-uw_group' }, children)
-    }
-
-    function BalanceBlock(props) {
-      const { balance, t, currency } = props
-      if (balance === null || balance === undefined) return null
-      if (balance.status !== 'ready') {
-        const label =
-          balance.status === 'signed-out'
-            ? t('balanceSignedOut')
-            : balance.status === 'unavailable'
-              ? t('balanceUnavailable')
-              : t('balanceFailed')
-        return h(KeyValue, { label: t('balance'), value: label })
-      }
-      const wallets = Array.isArray(balance.wallets) ? balance.wallets : []
-      const bonus = Array.isArray(balance.bonusWallets) ? balance.bonusWallets : []
-      const children = []
-      if (wallets.length === 0) {
-        children.push(h(KeyValue, { key: 'none', strong: true, label: t('balance'), value: t('none') }))
-      }
-      for (const wallet of wallets) {
-        children.push(
-          h(KeyValue, {
-            key: `w-${wallet.currency ?? 'x'}`,
-            strong: true,
-            label: t('balance'),
-            value: formatBalanceWallet(wallet, currency),
-          }),
-        )
-      }
-      for (const wallet of bonus) {
-        children.push(
-          h(KeyValue, {
-            key: `b-${wallet.currency ?? 'x'}`,
-            label: t('bonus'),
-            value: formatBalanceWallet(wallet, currency),
-          }),
-        )
-      }
-      return h('div', { className: 'dsh-uw_group' }, children)
-    }
-
-    /** The pricing window in force, with the countdown to the next one. */
-    function WindowBlock(props) {
-      const { view, t } = props
-      if (view === null || view === undefined) return null
-      const children = [
-        h(KeyValue, { key: 'phase', strong: true, label: t('window'), value: view.label }),
-        h(KeyValue, { key: 'mult', label: t('peakLabel'), value: view.multiplierText }),
-      ]
-      if (view.countdown.length > 0) {
-        children.push(
-          h(KeyValue, { key: 'next', label: t('switchIn'), value: `${view.countdown} → ${view.nextLabel}` }),
-        )
-      }
-      children.push(h('div', { key: 'hint', className: 'dsh-uw_hint' }, view.hint))
-      return h('div', { className: 'dsh-uw_group' }, children)
-    }
-
-    function UsagePanel(props) {
-      const { data, t, currency, sessionId, onRefresh, busy, window: windowInfo } = props
+    function UsageCard(props) {
+      const { data, t, currency, detail, error, busy, sessionId, onRefresh, window: windowInfo } = props
+      const balance = data?.balance ?? null
       const today = data?.today ?? null
+      const month = data?.month ?? null
       const session = data?.session ?? null
-      const models = Array.isArray(today?.models) ? today.models : []
+      const groups = walletGroups(balance, currency)
       const timestamp = Number.isFinite(data?.updatedAt) ? formatClock(data.updatedAt) : '—'
       const version = typeof data?.version === 'string' && data.version.length > 0 ? `v${data.version}` : ''
+      const showMonth = data?.pricing?.showMonth !== false
 
-      const groups = [
-        h('div', { className: 'dsh-uw_head', key: 'head' }, [
-          h('span', { className: 'dsh-uw_headTitle', key: 'title' }, t('todayUsage')),
-          h('span', { className: 'dsh-uw_headDay', key: 'day' }, today?.dayKey ?? ''),
-        ]),
-        h('div', { key: 'balance' }, h(BalanceBlock, { balance: data?.balance, t, currency })),
-        windowInfo === null ? null : h('div', { className: 'dsh-uw_divider', key: 'd0' }),
-        windowInfo === null ? null : h('div', { key: 'window' }, h(WindowBlock, { view: windowInfo, t })),
-        h('div', { className: 'dsh-uw_divider', key: 'd1' }),
-        h('div', { key: 'today' }, h(UsageBlock, { view: today, t, currency })),
-      ]
+      const rows = []
 
-      if (models.length > 0) {
-        groups.push(h('div', { className: 'dsh-uw_divider', key: 'd2' }))
-        groups.push(
+      // Balance: one emphasised figure, bonus dimmed underneath.
+      if (groups.main.length === 0) {
+        rows.push(
           h(
             'div',
-            { className: 'dsh-uw_group', key: 'models' },
-            [
-              h('div', { className: 'dsh-uw_groupTitle', key: 'h' }, t('byModel')),
-              h(
-                'div',
-                { className: 'dsh-uw_models', key: 'list' },
-                models.map((entry) =>
-                  h('div', { className: 'dsh-uw_model', key: entry.model }, [
-                    h('span', { className: 'dsh-uw_modelName', key: 'n' }, entry.model),
-                    h(
-                      'span',
-                      { className: 'dsh-uw_v', key: 'v' },
-                      `${formatTokens(entry.totalTokens)} · ${entry.priced ? formatMoney(entry.cost, currency) : t('none')}`,
-                    ),
-                  ]),
-                ),
-              ),
-            ],
+            { className: 'dsh-uw_line', key: 'bal' },
+            h('span', { className: 'dsh-uw_k' }, t('balance')),
+            h('span', { className: 'dsh-uw_v dsh-uw_big' }, balanceStatusText(balance, t)),
+          ),
+        )
+      } else {
+        rows.push(
+          h(
+            'div',
+            { className: 'dsh-uw_line', key: 'bal' },
+            h('span', { className: 'dsh-uw_k' }, t('balance')),
+            h('span', { className: 'dsh-uw_big' }, groups.main.join(' · ')),
+          ),
+        )
+      }
+      if (groups.bonus.length > 0) {
+        rows.push(
+          h(
+            'div',
+            { className: 'dsh-uw_line', key: 'bonus', style: { marginTop: '2px' } },
+            h('span', { className: 'dsh-uw_k' }, t('bonus')),
+            h('span', { className: 'dsh-uw_sub' }, groups.bonus.join(' · ')),
           ),
         )
       }
 
-      groups.push(h('div', { className: 'dsh-uw_divider', key: 'd3' }))
-      const month = data?.month ?? null
-      const showMonth = data?.pricing?.showMonth !== false
-      if (showMonth) {
-        groups.push(
-          h('div', { className: 'dsh-uw_group', key: 'month' }, [
+      rows.push(h('div', { className: 'dsh-uw_hr', key: 'h1' }))
+      rows.push(
+        h(
+          'div',
+          { className: 'dsh-uw_line', key: 'today' },
+          h('span', { className: 'dsh-uw_k' }, t('today')),
+          h('span', { className: 'dsh-uw_v' }, tokensAndCost(today, currency)),
+        ),
+      )
+
+      if (windowInfo !== null && windowInfo !== undefined) {
+        rows.push(
+          h(
+            'div',
+            { className: 'dsh-uw_line', key: 'window', style: { marginTop: '3px' } },
+            h(
+              'span',
+              { className: 'dsh-uw_pill' },
+              h('span', { className: `dsh-uw_dot${windowInfo.peak ? ' dsh-uw_dot--peak' : ''}` }),
+              windowInfo.label,
+            ),
+            h('span', { className: 'dsh-uw_time' }, windowInfo.nextText),
+          ),
+        )
+      }
+
+      if (!detail) {
+        rows.push(
+          h(
+            'div',
+            { className: 'dsh-uw_hint', key: 'hint' },
+            h('span', { className: 'dsh-uw_hintText' }, t('hintDetail')),
+          ),
+        )
+      } else {
+        rows.push(h('div', { className: 'dsh-uw_hr', key: 'h2' }))
+        if (today !== null && today !== undefined) {
+          const promptTokens = Number(today.inputTokens ?? 0) + Number(today.cacheReadTokens ?? 0)
+          rows.push(
+            h('div', { className: 'dsh-uw_grid', key: 'grid' }, [
+              h(Cell, { key: 'in', label: t('input'), value: formatTokens(today.inputTokens) }),
+              h(Cell, { key: 'out', label: t('output'), value: formatTokens(today.outputTokens) }),
+              h(Cell, { key: 'cache', label: t('inputCached'), value: formatTokens(today.cacheReadTokens) }),
+              h(Cell, {
+                key: 'hit',
+                label: t('cacheHit'),
+                value: formatPercent(promptTokens > 0 ? Number(today.cacheReadTokens ?? 0) / promptTokens : NaN),
+              }),
+            ]),
+          )
+          if (today.costComplete === false && Array.isArray(today.unpricedModels) && today.unpricedModels.length > 0) {
+            rows.push(
+              h('div', { className: 'dsh-uw_note', key: 'unpriced' }, `${t('unpriced')}: ${today.unpricedModels.join(', ')}`),
+            )
+          }
+        }
+        if (showMonth) {
+          rows.push(h(Line, { key: 'month', label: t('thisMonth'), value: tokensAndCost(month, currency) }))
+        }
+        rows.push(h(Line, { key: 'req', label: t('requests'), value: formatInt(today?.requests) }))
+        if (month !== null && month !== undefined && month.complete === false) {
+          rows.push(h('div', { className: 'dsh-uw_note', key: 'partial' }, t('monthPartial')))
+        }
+
+        const models = Array.isArray(today?.models) ? today.models : []
+        if (models.length > 0) {
+          rows.push(h('div', { className: 'dsh-uw_sectionTitle', key: 'mh' }, t('byModel')))
+          rows.push(
             h(
               'div',
-              { className: 'dsh-uw_groupTitle', key: 'h' },
-              `${t('monthUsage')}${month?.monthKey ? ` · ${month.monthKey}` : ''}`,
+              { className: 'dsh-uw_models', key: 'ml' },
+              models.map((entry) =>
+                h('div', { className: 'dsh-uw_model', key: entry.model }, [
+                  h('span', { className: 'dsh-uw_modelName' }, entry.model),
+                  h('span', { className: 'dsh-uw_v' }, tokensAndCost(entry, currency)),
+                ]),
+              ),
             ),
-            h(MonthBlock, { view: month, t, currency }),
-          ]),
-        )
-        groups.push(h('div', { className: 'dsh-uw_divider', key: 'd4' }))
-      }
+          )
+        }
 
-      groups.push(
-        h('div', { className: 'dsh-uw_group', key: 'session' }, [
+        // The session block only earns its rows when the host resolved one.
+        if (sessionId && session !== null && session !== undefined) {
+          rows.push(
+            h(Line, {
+              key: 'sess',
+              label: t('currentSession'),
+              value: tokensAndCost(session, currency),
+            }),
+          )
+        }
+
+        rows.push(
           h(
             'div',
-            { className: 'dsh-uw_groupTitle', key: 'h' },
-            sessionId ? `${t('currentSession')}` : t('sessionUnknown'),
+            { className: 'dsh-uw_foot', key: 'foot' },
+            h('span', { className: 'dsh-uw_time' }, `${t('updated')} ${timestamp}${version.length > 0 ? ` · ${version}` : ''}`),
+            h(
+              'button',
+              { type: 'button', className: 'dsh-uw_refresh', onClick: onRefresh, disabled: busy === true },
+              t('refresh'),
+            ),
           ),
-          sessionId ? h(UsageBlock, { view: session, t, currency, compact: true }) : null,
-          sessionId && session?.month !== undefined && session.month !== null
-            ? h(KeyValue, {
-                key: 'smonth',
-                label: t('thisMonth'),
-                value: `${formatTokens(session.month.totalTokens)} · ${formatMoney(session.month.cost, currency)}`,
-              })
-            : null,
-        ]),
-      )
-
-      groups.push(
-        h('div', { className: 'dsh-uw_foot', key: 'foot' }, [
-          h('span', { key: 'ts' }, `${t('updated')} ${timestamp}${version.length > 0 ? ` · ${version}` : ''}`),
-          h(
-            'button',
-            { type: 'button', className: 'dsh-uw_refresh', onClick: onRefresh, key: 'btn', disabled: busy === true },
-            t('refresh'),
-          ),
-        ]),
-      )
-
-      if (typeof data?.error === 'string' && data.error.length > 0) {
-        groups.push(h('div', { className: 'dsh-uw_note', key: 'err' }, `${t('error')}: ${data.error}`))
+        )
       }
 
-      return h('div', { className: 'dsh-uw_panel', role: 'group', 'aria-label': t('title') }, groups)
+      if (typeof error === 'string' && error.length > 0) {
+        rows.push(h('div', { className: 'dsh-uw_note', key: 'err' }, `${t('error')}: ${error}`))
+      }
+
+      return h('div', { className: 'dsh-uw_card', role: 'group', 'aria-label': t('title') }, rows)
     }
 
     /**
-     * Footer widget. Wide sidebar: two summary lines plus an expandable panel.
-     * Collapsed rail: the icon alone, with the full summary in its tooltip.
+     * Footer widget: one line collapsed, a small card on hover, the full
+     * breakdown only after a click. The collapsed rail shows the icon alone and
+     * carries a single short line in its tooltip.
      */
     function makeWidget(ctx, boundT) {
       return function UsageWidget(props) {
@@ -687,15 +656,11 @@ window.__ModuleLoader__.load({
           return () => clearInterval(timer)
         }, [load, refreshSeconds])
 
-        // The window countdown is only rendered inside the expanded panel, so
-        // a one-second re-render is only worth paying for while it is open.
-        // Without this the countdown sat frozen at the value the host answered
-        // with and only moved once per poll.
-        //
-        // The same tick re-reads the summary the moment the window boundary is
-        // crossed, so the badge flips on time instead of up to one poll late.
-        // `refreshedBoundary` keeps a late or skewed clock from turning that
-        // into a reload every second.
+        // The countdown is only rendered inside the card, so a one-second
+        // re-render is only worth paying for while it is open. The same tick
+        // re-reads the summary the moment the window boundary is crossed, so
+        // the badge flips on time instead of up to one poll late;
+        // `refreshedBoundary` keeps a late clock from reloading every second.
         const refreshedBoundary = React.useRef(0)
         React.useEffect(() => {
           if (!open) return undefined
@@ -713,54 +678,29 @@ window.__ModuleLoader__.load({
         }, [open, data, load])
 
         const currency = data?.pricing?.currency ?? 'CNY'
-        const today = data?.today ?? null
-        const month = data?.month ?? null
-        const showMonth = data?.pricing?.showMonth !== false
         const balance = data?.balance ?? null
-        // The current pricing window, or null when the host did not report one
-        // (an older host half) or the user turned the badge off.
+        const today = data?.today ?? null
         const elapsed = Number.isFinite(data?.receivedAt) ? Math.max(0, Date.now() - data.receivedAt) : 0
         const windowInfo = windowView(data, translate, elapsed)
 
-        const balanceWalletParts = walletParts(balance, currency, translate)
-        const balanceText = walletText(balanceWalletParts)
+        const groups = walletGroups(balance, currency)
+        const balanceText =
+          groups.main.length > 0
+            ? groups.main[0]
+            : data === null
+              ? translate('loading')
+              : balanceStatusText(balance, translate)
 
-        // Shared figure text; callers add the label so the tooltip never
-        // prefixes it twice.
-        const figure = (view) =>
-          `${formatTokens(view.totalTokens)} ${translate('tokens')} · ${formatMoney(view.cost, currency)}`
+        // Error wins over a stale figure: a failed poll must not keep showing
+        // an old number as if it were current.
+        const todayText =
+          error !== null
+            ? translate('error')
+            : today === null
+              ? translate('loading')
+              : `${translate('today')} ${formatMoney(today.cost, currency)}`
 
-        // Computed only when there is a day to describe: `figure` dereferences
-        // the view, so a null `today` must not reach it.
-        const todayText = today === null ? '' : `${translate('today')} ${figure(today)}`
-        const summaryLine = today
-          ? todayText
-          : error !== null
-            ? `${translate('error')}`
-            : translate('loading')
-        // The badge rides the today line so the window stays visible in the
-        // collapsed footer, where there is no room for a fourth line.
-        const summaryChildren =
-          today !== null && windowInfo !== null
-            ? [h(WindowBadge, { key: 'window', view: windowInfo }), h('span', { key: 'text' }, todayText)]
-            : summaryLine
-
-        const monthFigure = showMonth && month !== null ? figure(month) : null
-        const monthLine = monthFigure === null ? null : `${translate('thisMonth')} ${monthFigure}`
-
-        const tooltip = [
-          `${translate('balance')}: ${balanceText}`,
-          ...(windowInfo === null
-            ? []
-            : [
-                `${translate('window')}: ${windowInfo.label}${windowInfo.badgeText.length > 0 ? ` ${windowInfo.badgeText}` : ''}${
-                  windowInfo.countdown.length > 0 ? ` · ${translate('switchIn')} ${windowInfo.countdown}` : ''
-                }`,
-              ]),
-          `${translate('today')}: ${today === null ? summaryLine : figure(today)}`,
-          ...(monthFigure === null ? [] : [`${translate('thisMonth')}: ${monthFigure}`]),
-          translate('collapsedHint'),
-        ].join('\n')
+        const tooltip = `${translate('balance')} ${balanceText} · ${todayText} · ${translate('collapsedHint')}`
 
         if (!wide) {
           return h(
@@ -770,28 +710,35 @@ window.__ModuleLoader__.load({
           )
         }
 
-        // The topped-up balance leads and stays primary; each bonus wallet
-        // follows in a dimmed span so both are legible without expanding.
-        const balanceLineChildren = [h('span', { key: 'label' }, `${translate('balance')} `)]
-        balanceWalletParts.forEach((part, index) => {
-          if (index > 0) balanceLineChildren.push(h('span', { className: 'dsh-uw_sep', key: `sep-${index}` }, ' · '))
-          balanceLineChildren.push(
-            h(
-              'span',
-              { className: part.label === null ? undefined : 'dsh-uw_line--dim', key: `wallet-${index}` },
-              part.label === null ? part.value : `${part.label} ${part.value}`,
-            ),
-          )
-        })
-
-        const rowChildren = [
+        const row = h(
+          'button',
+          {
+            type: 'button',
+            className: `dsh-uw_row${open ? ' dsh-uw_row--open' : ''}`,
+            'aria-expanded': open,
+            'aria-haspopup': 'true',
+            'aria-label': translate('title'),
+            title: open ? undefined : tooltip,
+            onClick: () => {
+              if (pinned.current) {
+                pinned.current = false
+                setOpen(false)
+                return
+              }
+              pinned.current = true
+              setOpen(true)
+            },
+          },
           h('span', { className: 'dsh-uw_icon', key: 'icon' }, h(UsageIcon, { size: 16 })),
-          h('span', { className: 'dsh-uw_lines', key: 'lines' }, [
-            h('span', { className: 'dsh-uw_line', key: 'b' }, balanceLineChildren),
-            h('span', { className: `dsh-uw_line${error !== null ? ' dsh-uw_line--alert' : ' dsh-uw_line--dim'}`, key: 't' }, summaryChildren),
-            monthLine === null ? null : h('span', { className: 'dsh-uw_line dsh-uw_line--dim', key: 'm' }, monthLine),
-          ]),
-        ]
+          h('span', { className: 'dsh-uw_balance', key: 'bal' }, balanceText),
+          h('span', { className: 'dsh-uw_grow', key: 'grow' }),
+          windowInfo !== null && windowInfo.peak ? h('span', { className: 'dsh-uw_dot dsh-uw_dot--peak', key: 'dot' }) : null,
+          h(
+            'span',
+            { className: `dsh-uw_today${error !== null ? ' dsh-uw_today--alert' : ''}`, key: 'today' },
+            todayText,
+          ),
+        )
 
         return h(
           'div',
@@ -811,32 +758,20 @@ window.__ModuleLoader__.load({
             },
           },
           open
-            ? h(UsagePanel, {
-                data: data === null ? null : { ...data, error },
+            ? h(UsageCard, {
+                key: 'card',
+                data,
                 t: translate,
                 currency,
-                sessionId,
+                detail: pinned.current,
+                error,
                 busy,
+                sessionId,
                 window: windowInfo,
                 onRefresh: () => load(true),
               })
             : null,
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dsh-uw_row',
-              'aria-expanded': open,
-              'aria-haspopup': 'true',
-              'aria-label': translate('title'),
-              title: open ? undefined : tooltip,
-              onClick: () => {
-                pinned.current = !pinned.current
-                setOpen(pinned.current ? true : false)
-              },
-            },
-            rowChildren,
-          ),
+          row,
         )
       }
     }
@@ -888,8 +823,8 @@ window.__ModuleLoader__.load({
     }
 
     // `sessions` and `uiSession` are required, not optional: Cordis throws on
-    // reading an undeclared service property, and the current-session section
-    // reads the host's own main-view resolution from `uiSession`.
+    // reading an undeclared service property, and the session section reads the
+    // host's own main-view resolution from `uiSession`.
     return { inject: ['slots', 'locale', 'sessions', 'uiSession'], apply }
   },
 })

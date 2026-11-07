@@ -430,71 +430,93 @@ function unmount() {
 // The conversation shell has claimed the main view, which is the normal case.
 publishSession('session-test')
 
+/** Translator that interpolates the way the shipped dictionary does. */
+const tInterp = (key) => {
+  const map = {
+    untilPeak: '{time} 后高峰',
+    untilOffPeak: '{time} 后空闲',
+    peakLabel: '高峰时段',
+    offPeakLabel: '空闲时段',
+  }
+  return map[key] ?? key
+}
+
 const wideTree = await render({ wide: true, t: (key) => key })
 const wideText = textOf(wideTree)
 
-await check('wide footer row shows balance, bonus, today and month totals', () => {
-  assert.match(wideText, /balance\s+¥5\.83/, `balance rendered: ${wideText}`)
-  assert.match(wideText, /bonus\s+¥9\.79/, 'bonus wallet is visible without expanding')
-  assert.match(wideText, /today\s+20\.34M tokens · ¥1\.3/, 'today line rendered')
-  assert.match(wideText, /thisMonth\s+204\.52M tokens · ¥11\.14/, 'month line is visible without expanding')
+await check('the collapsed row is one line: balance and today spend only', () => {
+  assert.match(wideText, /¥5\.83/, `balance rendered: ${wideText}`)
+  assert.match(wideText, /today\s+¥1\.3/, `today spend rendered: ${wideText}`)
+  assert.ok(!wideText.includes('¥9.79'), 'the bonus wallet stays in the card')
+  assert.ok(!wideText.includes('204.52M'), 'the month total stays in the card')
   assert.ok(String(sandbox.__lastUrl).includes('sessionId=session-test'), 'the current session id is sent to the host')
 })
 
-await check('collapsed rail collapses to an icon carrying the full summary', async () => {
+await check('the collapsed rail is an icon with a one-line tooltip', async () => {
   const narrow = await render({ wide: false, t: (key) => key })
   const text = textOf(narrow)
-  assert.ok(!text.includes('20.34M'), 'no inline text in the rail')
+  assert.ok(!text.includes('¥5.83'), 'no inline text in the rail')
   const holder = find(narrow, (node) => node.props?.className === 'dsh-uw dsh-uw_narrow')
   assert.ok(holder, 'narrow holder present')
   const tooltip = String(holder.props.title)
-  assert.match(tooltip, /balance: ¥5\.83 · bonus ¥9\.79/, `bonus in the collapsed tooltip: ${tooltip}`)
-  assert.match(tooltip, /today: 20\.34M tokens · ¥1\.3/)
-  assert.match(tooltip, /thisMonth: 204\.52M tokens · ¥11\.14/, `month in the collapsed tooltip: ${tooltip}`)
-  assert.ok(!/today: today/.test(tooltip), 'the tooltip does not label the row twice')
+  assert.ok(!tooltip.includes('\n'), `the tooltip stays a single line: ${tooltip}`)
+  assert.match(tooltip, /¥5\.83/)
+  assert.match(tooltip, /today ¥1\.3/)
+  assert.ok(!tooltip.includes('204.52M'), 'the month total is no longer in the tooltip')
 })
 
-const clickTarget = find(wideTree, (node) => node.props?.className === 'dsh-uw_row')
+const rowOf = (tree) =>
+  find(tree, (node) => typeof node.props?.className === 'string' && node.props.className.startsWith('dsh-uw_row'))
 
 await check('the summary row is a real button with an expanded state', () => {
-  assert.ok(clickTarget, 'row found')
-  assert.equal(clickTarget.type, 'button')
-  assert.equal(clickTarget.props['aria-expanded'], false)
-  assert.equal(typeof clickTarget.props.onClick, 'function')
+  const target = rowOf(wideTree)
+  assert.ok(target, 'row found')
+  assert.equal(target.type, 'button')
+  assert.equal(target.props['aria-expanded'], false)
+  assert.equal(typeof target.props.onClick, 'function')
 })
 
-await check('clicking expands a panel with balance, month, per-model and session detail', async () => {
-  clickTarget.props.onClick()
-  const expanded = await render({ wide: true, t: (key) => key })
-  const text = textOf(expanded)
-  assert.ok(text.includes('todayUsage'), 'panel title present')
+await check('hovering opens a compact card, not the whole breakdown', async () => {
+  const root = find(wideTree, (node) => node.props?.className === 'dsh-uw')
+  assert.ok(root, 'root found')
+  root.props.onMouseEnter()
+  const hovered = await render({ wide: true, t: (key) => key })
+  const text = textOf(hovered)
+  assert.match(text, /balance\s+¥5\.83/)
+  assert.match(text, /bonus\s+¥9\.79/)
+  assert.match(text, /today\s+20\.34M · ¥1\.3/)
+  assert.ok(text.includes('hintDetail'), 'the card invites a click for the breakdown')
+  for (const hidden of ['input', 'cacheHit', 'byModel', 'thisMonth', 'requests', 'refresh', 'v9.9.9']) {
+    assert.ok(!text.includes(hidden), `hover must not show "${hidden}": ${text.slice(0, 240)}`)
+  }
+})
+
+await check('clicking pins the card and reveals the breakdown', async () => {
+  rowOf(await render({ wide: true, t: (key) => key })).props.onClick()
+  const pinned = await render({ wide: true, t: (key) => key })
+  const text = textOf(pinned)
+  assert.ok(text.includes('input'), 'input figure present')
+  assert.ok(text.includes('output'), 'output figure present')
+  assert.match(text, /cacheHit\s+98%/, `cache hit rate rendered: ${text.slice(0, 240)}`)
+  assert.ok(text.includes('byModel'), 'per-model section present')
   assert.ok(text.includes('deepseek-v4-flash-vision-exp'), 'per-model row present')
-  assert.ok(text.includes('¥9.79'), 'bonus wallet rendered')
-  assert.ok(text.includes('¥5.83'), 'main wallet rendered')
-  assert.ok(text.includes('session-test') || text.includes('currentSession'), 'current session section present')
+  assert.match(text, /thisMonth\s+204\.52M · ¥11\.14/, 'month figure present')
+  assert.match(text, /requests\s+154/, 'request count present')
+  assert.ok(text.includes('currentSession'), 'session section present')
+  assert.match(text, /currentSession\s+19\.26M · ¥0\.96/, 'session figure present')
   assert.ok(text.includes('refresh'), 'refresh action present')
-  assert.ok(text.includes('20.34M · ¥1.3'), `per-model tokens and cost rendered: ${text.slice(0, 200)}`)
-
-  // Month section: the cumulative figures, and its own day/session counts.
-  assert.ok(text.includes('monthUsage'), 'month section title present')
-  assert.ok(text.includes('2026-10'), 'month key present')
-  assert.ok(text.includes('204519158'), 'month token total present')
-  assert.ok(text.includes('¥11.14'), 'month cost present')
-  assert.ok(text.includes('777'), 'month request count present')
-  assert.ok(text.includes('activeDays'), 'active-day count labelled')
-  assert.ok(text.includes('190M · ¥10.5'), 'the current session month figure is shown')
-  assert.match(text, /cacheHit\s+98%/, `cache hit rate rendered: ${text.slice(0, 200)}`)
   assert.ok(text.includes('v9.9.9'), 'the loaded build version is shown')
-  assert.match(text, /switchIn[^]*1h 30m/, `the window countdown is rendered: ${text.slice(0, 300)}`)
 })
 
-await check('Escape closes the expanded panel', async () => {
+await check('Escape closes the card again', async () => {
   const holder = find(await render({ wide: true, t: (key) => key }), (node) => node.props?.className === 'dsh-uw')
   assert.ok(holder, 'widget holder found')
   assert.equal(typeof holder.props.onKeyDown, 'function', 'a keyboard handler is attached')
   holder.props.onKeyDown({ key: 'Escape' })
   const collapsed = await render({ wide: true, t: (key) => key })
-  assert.ok(!textOf(collapsed).includes('todayUsage'), 'the panel is closed again')
+  const text = textOf(collapsed)
+  assert.ok(!text.includes('bonus'), 'the card is closed again')
+  assert.match(text, /today\s+¥1\.3/, 'the collapsed row remains')
 })
 
 await check('the stylesheet is injected and its cleanup removes it', () => {
@@ -527,60 +549,62 @@ await check('re-resolves the current session when it appears after mount', async
     String(sandbox.__lastUrl).includes('sessionId=session-late'),
     `the late session is picked up: ${sandbox.__lastUrl}`,
   )
-  assert.ok(textOf(late).includes('20.34M'), 'the row still renders after the session arrives')
+  assert.match(textOf(late), /today\s+¥1\.3/, 'the row still renders after the session arrives')
 })
 
 /* `showMonth` is read from the fetched payload, so each case needs a fresh
- * mount rather than a re-render of already-loaded state. */
-await check('the month line can be turned off from config', async () => {
+ * mount rather than a re-render of already-loaded state. The month row lives in
+ * the clicked breakdown now, so the card has to be pinned before it exists. */
+await check('the month row can be turned off from config', async () => {
   sandbox.__payload = { ...PAYLOAD, pricing: { ...PAYLOAD.pricing, showMonth: false } }
   unmount()
   publishSession('session-toggle')
-  const off = await render({ wide: true, t: (key) => key })
-  assert.ok(textOf(off).includes('20.34M'), 'today line still rendered')
-  assert.ok(!textOf(off).includes('204.52M'), 'no month line when showMonth is false')
+  rowOf(await render({ wide: true, t: (key) => key })).props.onClick()
+  const off = textOf(await render({ wide: true, t: (key) => key }))
+  assert.ok(off.includes('requests'), 'the breakdown is open')
+  assert.ok(!off.includes('thisMonth'), 'no month row when showMonth is false')
+  assert.ok(!off.includes('204.52M'), 'no month figure when showMonth is false')
 
   sandbox.__payload = PAYLOAD
   unmount()
   publishSession('session-toggle')
-  const on = await render({ wide: true, t: (key) => key })
-  assert.ok(textOf(on).includes('204.52M'), 'month line returns when showMonth is true')
+  rowOf(await render({ wide: true, t: (key) => key })).props.onClick()
+  const on = textOf(await render({ wide: true, t: (key) => key }))
+  assert.ok(on.includes('thisMonth'), 'the month row returns when showMonth is true')
+  assert.ok(on.includes('204.52M'), 'the month figure returns')
 })
 
-/* `showWindow` is read from the fetched payload too, so it also needs a fresh
- * mount. The badge must stay on the today line and the window row must carry
- * the multiplier and the countdown the host computed. */
-await check('the peak/off-peak badge is shown and can be turned off from config', async () => {
+/* `showWindow` is read from the fetched payload too. The window row now lives in
+ * the hover card rather than on the collapsed line, and the collapsed line only
+ * carries a peak dot. */
+await check('the pricing window row appears in the card and can be turned off', async () => {
   sandbox.__payload = PAYLOAD
   unmount()
   publishSession('session-window')
-  const on = await render({ wide: true, t: (key) => key })
-  const text = textOf(on)
-  assert.match(text, /peakLabel\s*×2/, `the peak badge carries the multiplier: ${text.slice(0, 160)}`)
-  assert.match(
-    text,
-    /peakLabel\s*×2\s+today\s+20\.34M/,
-    `the badge precedes the today figure, not the month line: ${text.slice(0, 160)}`,
+  const mounted = await render({ wide: true, t: (key) => key })
+  find(mounted, (node) => node.props?.className === 'dsh-uw').props.onMouseEnter()
+  const hovered = await render({ wide: true, t: tInterp })
+  const text = textOf(hovered)
+  assert.match(text, /高峰时段/, `the phase is named in the card: ${text.slice(0, 260)}`)
+  assert.match(text, /1h 30m 后空闲/, `the countdown comes from host instants: ${text.slice(0, 260)}`)
+  assert.ok(
+    find(hovered, (node) => typeof node.props?.className === 'string' && node.props.className.includes('dsh-uw_dot--peak')),
+    'the collapsed row marks the peak window with a dot',
   )
-  // The row must be taken from the tree currently mounted, not from an earlier
-  // one: the expand click only affects live hook state.
-  const clickTargetForWindow = find(on, (node) => node.props?.className === 'dsh-uw_row')
-  assert.ok(clickTargetForWindow, 'the summary row is present in the fresh tree')
-
-  clickTargetForWindow.props.onClick()
-  const expanded = await render({ wide: true, t: (key) => key })
-  const panelText = textOf(expanded)
-  assert.match(panelText, /window\s+peakLabel/, `the window row names the current phase: ${panelText.slice(0, 220)}`)
-  assert.ok(panelText.includes('offPeakLabel'), 'the window row names the phase that follows')
-  assert.match(panelText, /switchIn\s+1h 30m/, `the countdown comes from host instants: ${panelText.slice(0, 260)}`)
 
   sandbox.__payload = { ...PAYLOAD, pricing: { ...PAYLOAD.pricing, showWindow: false } }
   unmount()
   publishSession('session-window')
-  const off = await render({ wide: true, t: (key) => key })
+  const mountedOff = await render({ wide: true, t: (key) => key })
+  find(mountedOff, (node) => node.props?.className === 'dsh-uw').props.onMouseEnter()
+  const off = await render({ wide: true, t: tInterp })
   const offText = textOf(off)
-  assert.ok(!offText.includes('peakLabel'), 'no badge when showWindow is false')
-  assert.ok(offText.includes('20.34M'), 'the today figure stays')
+  assert.ok(!offText.includes('高峰时段'), 'no window row when showWindow is false')
+  assert.ok(
+    !find(off, (node) => typeof node.props?.className === 'string' && node.props.className.includes('dsh-uw_dot--peak')),
+    'no peak dot when showWindow is false',
+  )
+  assert.match(offText, /today\s+20\.34M/, 'the today figure stays')
 
   sandbox.__payload = PAYLOAD
 })
